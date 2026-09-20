@@ -6,7 +6,8 @@
     "dev": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && node esbuild.config.mjs production",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:release": "node scripts/check-release.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",

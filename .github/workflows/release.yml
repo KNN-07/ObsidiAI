@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish tested plugin
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check out release metadata and notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node without dependency caching
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Download tested installable files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: obsidiai-plugin
+      - name: Validate release and required notes
+        run: |
+          node scripts/check-release.mjs
+          test -s ".github/release-notes/${RELEASE_TAG}.md"
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
+            if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "Refusing to overwrite an already published release."
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" main.js manifest.json styles.css --clobber
+          else
+            gh release create "$RELEASE_TAG" main.js manifest.json styles.css \
+              --verify-tag --draft --title "ObsidiAI ${RELEASE_TAG}" \
+              --notes-file ".github/release-notes/${RELEASE_TAG}.md"
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false --latest \
+            --title "ObsidiAI ${RELEASE_TAG}" \
+            --notes-file ".github/release-notes/${RELEASE_TAG}.md"

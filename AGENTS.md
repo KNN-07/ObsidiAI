@@ -17,6 +17,7 @@ ObsidiAI is a desktop-only Obsidian plugin providing a native workspace AI-agent
 - `src/agent/`: provider transport, credentials, conversation orchestration, and tool services.
 - `src/ui/`: native Obsidian views, authentication, and approval dialogs.
 - `src/vault/`, `src/skills/`, `src/plugins/`: shared path policy, vault-local skill discovery, and isolated native plugin-manager/release boundaries.
+- `.github/workflows/`: shared CI and tag-triggered publication; `.github/release-notes/` holds reviewed per-version notes. `scripts/check-release.mjs` validates release metadata and built assets.
 - `tests/`: behavioral suites; `tests/fixtures/knowledge.ts` shares metadata/graph host doubles. Other fixtures are mostly suite-local.
 
 ## Development Commands
@@ -27,6 +28,7 @@ Run from the repository root:
 npm ci                                    # Install the locked dependency graph
 npm run typecheck                         # Strict source and test checking
 npm run build                             # Typecheck, then production main.js
+npm run check:release                     # Validate versions and built release assets
 npm test                                  # Vitest, one complete run
 npm test -- tests/vault-tools.test.ts      # Focused suite
 npm run dev                               # Long-running esbuild watch
@@ -49,7 +51,7 @@ No lint/format script or configured formatter exists. Watch mode does not launch
 - `src/settings.ts`: non-secret settings schema and shared `renderProviderSettings` used by both settings surfaces.
 - `src/vault/paths.ts`, `src/ui/approval-modal.ts`: shared path and single-pending-approval contracts.
 - `src/plugins/bridge.ts`, `src/plugins/registry.ts`: private-manager feature checks and official-registry/exact-release validation.
-- `manifest.json`, `tsconfig.json`, `esbuild.config.mjs`, `package.json`, `package-lock.json`: compatibility, compilation, bundling, and reproducible tooling. Root `main.js` is generated and ignored; never hand-edit it.
+- `manifest.json`, `versions.json`, `tsconfig.json`, `esbuild.config.mjs`, `package.json`, `package-lock.json`: compatibility, compilation, bundling, and reproducible tooling. Root `main.js` is generated and ignored; never hand-edit it.
 
 ## Runtime/Tooling Preferences
 
@@ -63,4 +65,4 @@ Vitest tests use narrow `vi.mock('obsidian', ...)` boundaries and in-memory fixt
 
 Assert observable bytes, tool outcomes, cancellation settlement, credential consistency, cache completeness, and installed/enabled/loaded state. Drive approvals with promise gates/subscriptions rather than arbitrary sleeps. Cover stale state, rejection, abort, late clicks, and partial native failures when changing mutation policy.
 
-Run the affected suite, then `npm run build` and `npm test`. No coverage thresholds, CI workflow, or checked-in native/packaged smoke runner exists. Mocked tests do **not** verify native UI, actual private-manager effects, or provider SDK packaging. For those changes, separately exercise isolated bundles and a disposable Obsidian host; report unavailable host/account checks explicitly rather than claiming native verification.
+Run the affected suite, then `npm run build`, `npm test`, and `npm run check:release`. GitHub Actions repeats checks on Node 22.19.0 and Node 24; release tags must exactly match the package/lockfile/manifest version without a `v` prefix. Update `versions.json` and `.github/release-notes/<version>.md` for each release. Keep third-party actions pinned to full commit SHAs and write permissions confined to publication. No coverage thresholds or checked-in native/packaged smoke runner exists. Mocked tests do **not** verify native UI, actual private-manager effects, or provider SDK packaging; separately exercise isolated bundles and a disposable Obsidian host and report unavailable host/account checks explicitly.

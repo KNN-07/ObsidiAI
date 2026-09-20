@@ -1,5 +1,8 @@
 # ObsidiAI
 
+[![CI](https://github.com/KNN-07/ObsidiAI/actions/workflows/ci.yml/badge.svg)](https://github.com/KNN-07/ObsidiAI/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/KNN-07/ObsidiAI)](https://github.com/KNN-07/ObsidiAI/releases/latest)
+
 ### Your vault. Your models. Your approval.
 
 An AI agent in a native Obsidian tab. Ask questions across your notes, explore the connections between ideas, and turn a conversation into reviewed changes—without leaving your workspace.
@@ -46,7 +49,31 @@ Provider availability is not a promise of account access. Subscription eligibili
 - **Node 22.19.0+ and npm** on your development machine to build from source.
 - A provider account/API key, or an ambient authentication method supported by your chosen provider, to send model requests.
 
-### Build and install
+### Install a release
+
+Download **main.js**, **manifest.json**, and **styles.css** from the [latest GitHub release](https://github.com/KNN-07/ObsidiAI/releases/latest). Use the individual release assets, not GitHub's automatic source archives. No local build or Node installation is needed to install these files; Obsidian's embedded Node requirement still applies.
+
+Create this folder in a **disposable test vault**:
+
+```text
+<test-vault>/.obsidian/plugins/obsidiai/
+```
+
+Copy the three downloaded files into it:
+
+```text
+main.js
+manifest.json
+styles.css
+```
+
+Application dependencies are bundled into `main.js`; do not copy `node_modules`.
+
+Open the test vault in Obsidian, enable community plugins if needed, and enable **ObsidiAI**. You may need to reload Obsidian after copying the files.
+
+### Build from source
+
+If you want to develop or inspect a build yourself:
 
 ```sh
 git clone https://github.com/KNN-07/ObsidiAI.git
@@ -55,23 +82,7 @@ npm ci
 npm run build
 ```
 
-Create this folder in a **disposable test vault**:
-
-```text
-<test-vault>/.obsidian/plugins/obsidiai/
-```
-
-Copy these three files from the repository root into it:
-
-```text
-main.js
-manifest.json
-styles.css
-```
-
-Application dependencies are bundled into `main.js`; do not copy `node_modules`. The generated bundle is not tracked in Git, so build it before copying.
-
-Open the test vault in Obsidian, enable community plugins if needed, and enable **ObsidiAI**. You may need to reload Obsidian after copying the files.
+Then install the three generated/root files using the same steps above. `main.js` is generated and not tracked in Git.
 
 ### Connect and start a conversation
 
@@ -139,6 +150,7 @@ npm run typecheck                         # Check source and tests
 npm test                                  # Run the behavioral suite
 npm test -- tests/vault-tools.test.ts      # Run a focused suite
 npm run build                             # Typecheck and bundle for production
+npm run check:release                     # Validate versions and built release assets
 npm run dev                               # Watch and rebuild; does not launch Obsidian
 ```
 
@@ -147,6 +159,19 @@ The implementation uses TypeScript, native Obsidian components, pi Agent/Models,
 Verification to date includes deterministic real-Agent tool loops, approval/conflict/cancellation cases, credential serialization, graph/metadata queries, skill restrictions, and plugin lifecycle policy. Isolated bundle checks have exercised incremental local SSE and cancellation through the real OpenAI-compatible and Google adapters, OAuth start/cancel, and host-fetch isolation.
 
 Those checks are **not** proof of native UI behavior, successful remote authentication, or actual native plugin installation/uninstallation. Keep native-host verification separate, use disposable vaults, and never include credentials or private note content in bug reports.
+
+### CI and releases
+
+GitHub Actions runs tests, typechecking, production builds, and release validation on pull requests and pushes to `main`, using **Node 22.19.0 and Node 24**. Successful runs retain the installable plugin artifact for seven days.
+
+To prepare a release:
+
+1. Keep `package.json`, `package-lock.json`, and `manifest.json` versions identical. Add the version-to-minimum-Obsidian mapping to `versions.json`.
+2. Add reviewed notes at `.github/release-notes/<version>.md`.
+3. Run `npm run build`, `npm test`, and `npm run check:release`. Commit and push the changes.
+4. Push an annotated tag matching the manifest version exactly—such as `0.1.0`, **not** `v0.1.0`.
+
+The Release workflow reruns the shared CI checks, downloads the tested artifact, and publishes the three plugin assets. A draft is published only after asset upload succeeds. Published releases are not overwritten; fix a failed draft by rerunning its workflow, or ship a new version for changes to an existing public release.
 
 ## Feedback
 
