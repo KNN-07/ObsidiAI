@@ -221,6 +221,36 @@ describe("real Agent conversation settlement", () => {
   await f.controller.reset(); expect(f.controller.timeline).toEqual([]);
   await f.controller.dispose();
  });
+ it("shows attachment labels while preserving model context across history reload", async () => {
+  let bytes = "";
+  const adapter = { async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path: string, value: string) { bytes = value; } };
+  const history = new HistoryStore(adapter, "history.json");
+  const f = fixture({}, history); await f.configure();
+  f.controller.addAttachment("Projects/Alpha.md", "PRIVATE NOTE BODY");
+  f.controller.services.skills.selectedContext = async () => "PRIVATE SKILL BODY";
+  f.controller.selectSkill("review");
+  f.faux.setResponses([(context: Context) => {
+   expect(JSON.stringify(context.messages)).toContain("PRIVATE NOTE BODY");
+   expect(JSON.stringify(context.messages)).toContain("PRIVATE SKILL BODY");
+   return fauxAssistantMessage("Reviewed.");
+  }]);
+  await f.controller.send("Review the attached note.");
+  expect(f.controller.timeline.find(t => t.kind === "user")).toMatchObject({
+   text: "Review the attached note.", attachmentPaths: ["Projects/Alpha.md"], skillNames: ["review"],
+  });
+  expect(JSON.stringify(f.controller.timeline)).not.toMatch(/PRIVATE NOTE BODY|PRIVATE SKILL BODY/);
+  const [saved] = await history.list(); await f.controller.dispose();
+  const next = fixture({}, new HistoryStore(adapter, "history.json")); await next.configure();
+  await next.controller.openConversation(saved!.id);
+  expect(next.controller.timeline.find(t => t.kind === "user")).toMatchObject({ text: "Review the attached note.", attachmentPaths: ["Projects/Alpha.md"] });
+  next.faux.setResponses([(context: Context) => {
+   expect(JSON.stringify(context.messages)).toContain("PRIVATE NOTE BODY");
+   return fauxAssistantMessage("Remembered.");
+  }]);
+  await next.controller.send("Continue.");
+  expect(next.controller.timeline.filter(t => t.kind === "user").at(-1)).toMatchObject({ text: "Continue." });
+  await next.controller.dispose();
+ });
  it("surfaces assistant error stopReason without exposing upstream error bodies", async () => {
   const f = fixture(); await f.configure(); f.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "secret-token-upstream" })]);
   await f.controller.send("Hello");

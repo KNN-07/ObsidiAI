@@ -7,7 +7,7 @@ import { safeProviderError } from "./provider-errors";
 
 export type RunState = "idle" | "running" | "awaiting-approval" | "stopping";
 export interface Attachment { id: string; path: string; content: string; }
-export interface TimelineItem { id: string; kind: "user" | "assistant" | "tool" | "error"; text: string; complete: boolean; sourcePath: string; toolName?: string; status?: string; details?: unknown; }
+export interface TimelineItem { id: string; kind: "user" | "assistant" | "tool" | "error"; text: string; complete: boolean; sourcePath: string; attachmentPaths?: string[]; skillNames?: string[]; toolName?: string; status?: string; details?: unknown; }
 export interface ControllerServices {
  notes: { tools: AgentTool<any>[]; beginRun(): void; endRun(): void };
  metadata: { tools: AgentTool<any>[] };
@@ -38,6 +38,7 @@ export class AgentController {
  private disposed = false;
  private sourcePath = "";
  private streaming?: TimelineItem;
+ private submittedMessage?: Pick<TimelineItem, "text" | "attachmentPaths" | "skillNames">;
  private selected?: Model<Api>;
  private effectiveThinkingLevel: ModelThinkingLevel = "off";
  private supportedThinkingLevels: readonly ModelThinkingLevel[] = [];
@@ -145,9 +146,11 @@ export class AgentController {
   signal.throwIfAborted();
   for (const attachment of attachments) { const index = this.attachments.indexOf(attachment); if (index >= 0) this.attachments.splice(index, 1); }
   for (const name of names) this.selectedSkills.delete(name);
+  this.submittedMessage = { text, attachmentPaths: attachments.map(a => a.path), skillNames: [...names] };
   onSubmitted?.();
   try { await this.agent!.prompt(input); await this.agent!.waitForIdle(); }
   catch (error) { this.timeline.push({ id: crypto.randomUUID(), kind: "error", text: this.state === "stopping" ? "Stopped. Already applied changes are not undone." : safeProviderError(error), complete: true, sourcePath: this.sourcePath }); }
+  finally { this.submittedMessage = undefined; }
  }
  private createAgent(messages: Conversation["messages"] = []): void {
   this.unsubscribeAgent?.();
@@ -208,7 +211,9 @@ export class AgentController {
  }
  private onEvent(event: AgentEvent): void {
   if (event.type === "message_start" && event.message.role === "user") {
-   this.timeline.push({ id: crypto.randomUUID(), kind: "user", text: typeof event.message.content === "string" ? event.message.content : event.message.content.filter(c => c.type === "text").map(c => c.text).join("\n"), complete: true, sourcePath: this.sourcePath });
+   const display = this.submittedMessage;
+   this.submittedMessage = undefined;
+   this.timeline.push({ id: crypto.randomUUID(), kind: "user", ...(display ?? { text: typeof event.message.content === "string" ? event.message.content : event.message.content.filter(c => c.type === "text").map(c => c.text).join("\n") }), complete: true, sourcePath: this.sourcePath });
   }
   if (event.type === "message_start" && event.message.role === "assistant") {
    this.streaming = { id: crypto.randomUUID(), kind: "assistant", text: "", complete: false, sourcePath: this.sourcePath }; this.timeline.push(this.streaming);

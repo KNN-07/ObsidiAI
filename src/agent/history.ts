@@ -38,6 +38,7 @@ export class HistoryStore implements ConversationHistory {
    if (!c || typeof c.id !== "string" || ids.has(c.id) || typeof c.title !== "string" || !Number.isFinite(c.createdAt) || !Number.isFinite(c.updatedAt) || typeof c.providerId !== "string" || typeof c.modelId !== "string" || !Array.isArray(c.messages) || !Array.isArray(c.timeline)) throw new Error("Invalid conversation");
    if (c.messages.some((m: Record<string, unknown>) => !m || !["user", "assistant", "toolResult"].includes(String(m.role)) || !(typeof m.content === "string" || Array.isArray(m.content)))) throw new Error("Invalid messages");
    if (c.timeline.some((t: Record<string, unknown>) => !t || typeof t.id !== "string" || !["user", "assistant", "tool", "error"].includes(String(t.kind)) || typeof t.text !== "string" || typeof t.sourcePath !== "string" || typeof t.complete !== "boolean")) throw new Error("Invalid timeline");
+   if (c.timeline.some((t: Record<string, unknown>) => [t.attachmentPaths, t.skillNames].some(value => value !== undefined && (!Array.isArray(value) || value.some(item => typeof item !== "string"))))) throw new Error("Invalid displayed context");
    ids.add(c.id);
   }
   return this.records = data.conversations;

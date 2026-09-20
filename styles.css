@@ -17,7 +17,7 @@
 .obsidiai-header { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 20px; flex-shrink: 0; }
 .obsidiai-brand { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; letter-spacing: -.025em; }
 .obsidiai-brand-mark { display: flex; color: var(--obsidiai-accent); }
-.obsidiai-brand-mark svg { width: 18px; height: 18px; }
+.obsidiai-brand-mark svg { width: 24px; height: 24px; }
 .obsidiai-header-actions { display: flex; gap: 4px; margin-left: auto; }
 .obsidiai-status { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
 .obsidiai-status[data-state="awaiting-approval"] { color: var(--text-warning); }
@@ -35,7 +35,7 @@
 .obsidiai-agent[data-empty="true"] .obsidiai-scroll { flex: 0 1 auto; }
 .obsidiai-welcome { width: min(100% - 48px, var(--obsidiai-column)); margin: 0 auto; padding: 28px 0 24px; text-align: center; }
 .obsidiai-hero-mark { display: flex; justify-content: center; margin-bottom: 18px; color: var(--obsidiai-accent); }
-.obsidiai-hero-mark svg { width: 38px; height: 38px; stroke-width: 1.5; }
+.obsidiai-hero-mark svg { width: 56px; height: 56px; }
 .obsidiai-welcome h1, .obsidiai-unavailable h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(28px, 4.5cqi, 42px); font-weight: 400; line-height: 1.2; letter-spacing: -.035em; }
 .obsidiai-welcome-copy { margin: 12px 0 28px; font-size: 14px; line-height: 1.5; color: var(--text-muted); }
 .obsidiai-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; text-align: left; }
@@ -87,11 +87,17 @@
 .obsidiai-message:last-child { margin-bottom: 0; }
 .obsidiai-message-body { white-space: pre-wrap; }
 .obsidiai-user { width: fit-content; max-width: 86%; margin-left: auto; padding: 12px 18px; border: 1px solid var(--background-modifier-border); border-radius: 16px 16px 4px 16px; background: var(--background-secondary); }
+.obsidiai-sent-context { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.obsidiai-sent-attachment { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border: 1px solid var(--background-modifier-border); border-radius: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.4; text-decoration: none; }
+.obsidiai-sent-attachment > span:first-child { display: flex; flex-shrink: 0; }
+.obsidiai-sent-attachment > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obsidiai-sent-attachment svg { width: 13px; height: 13px; }
 .obsidiai-author { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; color: var(--text-muted); font-size: 11px; font-weight: 500; line-height: 1.4; }
 .obsidiai-author > span:first-child { display: flex; color: var(--obsidiai-accent); }
-.obsidiai-author svg { width: 17px; height: 17px; }
+.obsidiai-author svg { width: 22px; height: 22px; }
 .obsidiai-assistant { padding: 0 4px; }
-.obsidiai-assistant[data-streaming="true"] .obsidiai-message-body:empty::after { content: "Thinking…"; color: var(--text-faint); font-size: 13px; }
+.obsidiai-assistant[data-streaming="true"] .obsidiai-message-body:empty::after { content: "Thinking…"; color: var(--text-muted); font-size: 13px; animation: obsidiai-thinking 1.6s ease-in-out infinite; }
+.obsidiai-assistant[data-streaming="true"] .obsidiai-assistant-logo { animation: obsidiai-thinking 1.6s ease-in-out infinite; }
 .obsidiai-prose { white-space: normal; }
 .obsidiai-prose > :first-child { margin-top: 0; }
 .obsidiai-prose > :last-child { margin-bottom: 0; }
@@ -176,6 +182,11 @@
 .obsidiai-message, .obsidiai-chip { animation: obsidiai-enter 160ms ease-out both; }
 .obsidiai-agent button, .obsidiai-tool-summary, .obsidiai-tool-status, .obsidiai-status { transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }
 .obsidiai-tool-chevron { transition: transform 140ms ease; }
+@keyframes obsidiai-thinking { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes obsidiai-stream-reveal { from { opacity: .35; filter: blur(1px); } to { opacity: 1; filter: blur(0); } }
+@keyframes obsidiai-result-reveal { from { opacity: .85; } to { opacity: 1; } }
+.obsidiai-stream-reveal { animation: obsidiai-stream-reveal 180ms ease-out both; }
+.obsidiai-result-reveal { animation: obsidiai-result-reveal 220ms ease-out; }
 @media (prefers-reduced-motion: reduce) {
  .obsidiai-agent *, .obsidiai-agent *::before, .obsidiai-agent *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

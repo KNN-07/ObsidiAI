@@ -1,4 +1,4 @@
-import { Notice, Plugin, type WorkspaceLeaf } from "obsidian";
+import { addIcon, Notice, Plugin, type WorkspaceLeaf } from "obsidian";
 import { AgentView, AGENT_VIEW_TYPE, type AgentViewHost } from "./ui/agent-view";
 import { AuthModal } from "./ui/auth-modal";
 import { loadSettings, ObsidiAISettingTab, ConnectionSettingsModal, disposeProviderSettings, type ObsidiAISettings } from "./settings";
@@ -10,6 +10,7 @@ import type { MetadataService } from "./agent/metadata-tools";
 import type { PluginLifecycleService } from "./agent/plugin-tools";
 import type { ApprovalController } from "./ui/approval-modal";
 import { HistoryStore } from "./agent/history";
+import logoSvg from "../assets/obsidiai-logo.svg";
 
 export function supportedNode(version: string): boolean {
  const [major = 0, minor = 0, patch = 0] = version.split(".").map(Number);
@@ -30,6 +31,9 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
  private disposed = false;
  private readonly listeners = new Set<() => void>();
  async onload(): Promise<void> {
+  const logo = new DOMParser().parseFromString(logoSvg, "image/svg+xml").documentElement;
+  logo.querySelectorAll("title, desc").forEach(element => element.remove());
+  addIcon("obsidiai-logo", `<g transform="scale(0.78125)">${logo.innerHTML}</g>`);
   this.settings = loadSettings(await this.loadData());
   await this.saveSettings();
   const version = typeof process !== "undefined" ? process.versions?.node ?? "0" : "0";
@@ -60,7 +64,7 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
   }
   this.registerView(AGENT_VIEW_TYPE, leaf => new AgentView(leaf, this));
   this.addCommand({ id: "open-agent", name: "Open agent tab", callback: () => { void this.openAgent(); } });
-  this.addRibbonIcon("bot", "Open ObsidiAI agent", () => { void this.openAgent(); });
+  this.addRibbonIcon("obsidiai-logo", "Open ObsidiAI agent", () => { void this.openAgent(); });
   this.addSettingTab(new ObsidiAISettingTab(this.app, this, this));
   this.addCommand({ id: "choose-skill", name: "Choose skill", callback: () => { void this.openAgent().then(leaf => { if (leaf.view instanceof AgentView) void leaf.view.chooseSkill(); }); } });
   this.addCommand({ id: "ask-about-selection", name: "Ask agent about selection", editorCheckCallback: (checking, editor, view) => {

@@ -43,6 +43,8 @@ interface RenderedMessage {
  status?: HTMLElement;
  context?: HTMLElement;
  notice?: HTMLElement;
+ tail?: HTMLElement;
+ tailText?: string;
 }
 const TOOL_PRESENTATION: Record<string, { label: string; icon: string }> = {
  search_notes: { label: "Searching notes", icon: "search" },
@@ -111,7 +113,7 @@ export class AgentView extends ItemView {
  constructor(leaf: WorkspaceLeaf, private readonly host: AgentViewHost) { super(leaf); }
  getViewType(): string { return AGENT_VIEW_TYPE; }
  getDisplayText(): string { return "ObsidiAI"; }
- getIcon(): string { return "bot"; }
+ getIcon(): string { return "obsidiai-logo"; }
 
  private iconButton(container: HTMLElement, label: string, icon: string, action: () => void): ButtonComponent {
   const button = new ButtonComponent(container).setIcon(icon).setTooltip(label).onClick(action);
@@ -127,7 +129,7 @@ export class AgentView extends ItemView {
   this.contentEl.addClass("obsidiai-agent");
   const header = this.contentEl.createDiv({ cls: "obsidiai-header" });
   const brand = header.createDiv({ cls: "obsidiai-brand" });
-  setIcon(brand.createSpan({ cls: "obsidiai-brand-mark", attr: { "aria-hidden": "true" } }), "sparkles");
+  setIcon(brand.createSpan({ cls: "obsidiai-brand-mark", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
   brand.createSpan({ text: "ObsidiAI" });
   this.statusEl = header.createSpan({ cls: "obsidiai-status", attr: { role: "status", "aria-live": "polite" } });
   const headerActions = header.createDiv({ cls: "obsidiai-header-actions" });
@@ -149,7 +151,7 @@ export class AgentView extends ItemView {
   this.iconButton(headerActions, "Settings", "settings-2", () => new ConnectionSettingsModal(this.app, this.host).open());
   if (!controller) {
    const unavailable = this.contentEl.createDiv({ cls: "obsidiai-unavailable" });
-   setIcon(unavailable.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "sparkles");
+   setIcon(unavailable.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
    unavailable.createEl("h2", { text: "A little setup first." });
    unavailable.createEl("p", { text: this.host.disabledReason || "Agent initialization is unavailable." });
    new ButtonComponent(unavailable).setButtonText("Open settings").onClick(() => new ConnectionSettingsModal(this.app, this.host).open());
@@ -159,7 +161,7 @@ export class AgentView extends ItemView {
   const stage = this.contentEl.createDiv({ cls: "obsidiai-stage" });
   this.scrollEl = stage.createDiv({ cls: "obsidiai-scroll" });
   this.emptyEl = this.scrollEl.createDiv({ cls: "obsidiai-welcome" });
-  setIcon(this.emptyEl.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "sparkles");
+  setIcon(this.emptyEl.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
   this.emptyEl.createEl("h1", { text: "What’s on your mind?" });
   this.emptyEl.createEl("p", { cls: "obsidiai-welcome-copy", text: "A place to think with your notes." });
   const suggestions = this.emptyEl.createDiv({ cls: "obsidiai-suggestions" });
@@ -497,8 +499,23 @@ export class AgentView extends ItemView {
     notice = title.createSpan({ cls: "obsidiai-tool-notice" }); notice.hidden = true;
    } else if (item.kind === "assistant") {
     const author = el.createDiv({ cls: "obsidiai-author" });
-    setIcon(author.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
+    setIcon(author.createSpan({ cls: "obsidiai-assistant-logo", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
     author.createSpan({ text: "ObsidiAI" });
+   }
+   if (item.kind === "user" && (item.attachmentPaths?.length || item.skillNames?.length)) {
+    const attachments = el.createDiv({ cls: "obsidiai-sent-context", attr: { "aria-label": "Attached context" } });
+    for (const path of item.attachmentPaths ?? []) {
+     try { validateVaultPath(path, this.app.vault.configDir); } catch { continue; }
+     const link = attachments.createEl("a", { cls: "internal-link obsidiai-sent-attachment", href: path, attr: { "aria-label": `Open attached note: ${path}`, title: path } });
+     setIcon(link.createSpan({ attr: { "aria-hidden": "true" } }), "file-text");
+     link.createSpan({ text: path });
+     link.addEventListener("click", event => { event.preventDefault(); void this.app.workspace.openLinkText(path, ""); });
+    }
+    for (const name of item.skillNames ?? []) {
+     const skill = attachments.createSpan({ cls: "obsidiai-sent-attachment" });
+     setIcon(skill.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
+     skill.createSpan({ text: name });
+    }
    }
    const body = el.createDiv({ cls: item.kind === "tool" ? "obsidiai-tool-body" : "obsidiai-message-body" });
    const text = el.doc.createTextNode(""); body.appendChild(text);
@@ -522,17 +539,34 @@ export class AgentView extends ItemView {
    }
   }
   if (rendered.complete) return;
-  if (item.text.startsWith(rendered.last)) rendered.text.appendData(item.text.slice(rendered.last.length)); else rendered.text.data = item.text;
+  if (rendered.last !== item.text) {
+   const append = item.text.startsWith(rendered.last);
+   if (rendered.tail) {
+    if (append) rendered.text.appendData(rendered.tailText ?? "");
+    rendered.tail.remove(); rendered.tail = undefined; rendered.tailText = undefined;
+   }
+   if (item.kind === "assistant" && !item.complete && append) {
+    const delta = item.text.slice(rendered.last.length);
+    rendered.tail = rendered.body.createSpan({ cls: "obsidiai-stream-reveal", text: delta });
+    rendered.tailText = delta;
+   } else if (append) rendered.text.appendData(item.text.slice(rendered.last.length));
+   else rendered.text.data = item.text;
+  }
   rendered.last = item.text;
   rendered.el.setAttr("data-streaming", String(!item.complete));
+  if (!item.complete) rendered.el.setAttr("data-live-response", "true");
   if (!item.complete) return;
   rendered.complete = true;
   if (item.kind === "assistant") {
    rendered.el.hidden = !item.text;
+   rendered.tail = undefined; rendered.tailText = undefined;
    rendered.body.empty(); rendered.body.addClass("obsidiai-prose");
    const component = new Component(); this.addChild(component); rendered.component = component;
    const record = rendered;
    void MarkdownRenderer.render(this.app, item.text, rendered.body, item.sourcePath, component).then(() => {
+    if (this.closed || this.rendered.get(item.id) !== record) return;
+    // Fade the final Markdown only for a live response, never replay saved history.
+    if (record.last && record.el.dataset.liveResponse === "true" && !item.status) record.body.addClass("obsidiai-result-reveal");
     if (this.rendered.get(item.id) === record && this.followLatest) this.scrollToLatest();
    }).catch(() => { if (!this.closed && this.rendered.get(item.id) === record) record.body.setText(item.text); });
   }

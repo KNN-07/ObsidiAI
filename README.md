@@ -17,9 +17,9 @@ Powered by [pi](https://github.com/earendil-works/pi), ObsidiAI runs inside the 
 
 > **Early preview · Desktop only.** Behavioral tests and isolated bundle checks cover the implementation. The native UI, permissions, quick context, and saved history have been checked in a disposable vault on Obsidian 1.13.7. A real NVIDIA request and cancellation were also verified there; successful OAuth login and actual native plugin-manager lifecycle effects remain unverified. Start in a disposable vault, not your only copy of important notes.
 
-![Native ObsidiAI chat in Obsidian's light theme, with model and thinking-effort controls in the composer](assets/chat-light.png)
+![Native ObsidiAI chat with the notebook logo, compact attached-file label, and completed Markdown response](assets/chat-light.png)
 
-*Actual Obsidian 1.13.7, in a disposable vault with local scripted providers and sample conversation content. No private notes or credentials are shown. Screenshots show the interface included in 0.1.1.*
+*Actual Obsidian 1.13.7, in a disposable vault with local scripted providers and sample conversation content. No private notes or credentials are shown. The chat screenshot shows 0.1.3; the unchanged provider-settings layout below was captured for 0.1.1.*
 
 ## From question to approved change
 
@@ -62,9 +62,10 @@ The source build uses a Claude-inspired arrangement with restrained, shadcn-styl
 - **Start in the center.** Suggested prompts fill the draft without sending it. Provider setup remains visible until a model is ready.
 - **Keep actions with the draft.** The paperclip, Skills picker, model selector, thinking-effort picker, permissions control, and Send/Stop controls sit inside the composer. Selected context appears as removable chips.
 - **Read without clutter.** User messages align right; assistant responses use a readable column capped at 760px. Expand a tool card for its result and note links. Errors expand automatically; code-execution warnings and partial-result notices remain visible when collapsed.
+- **Follow a live answer.** Incoming text gently fades into place while earlier text stays stable. The notebook logo and Thinking indicator pulse while streaming; completed Markdown has a brief transition. Reduced-motion preferences disable these effects.
 - **Use any pane width.** The layout adapts to narrow split panes and Obsidian's light/dark themes. Enter sends; Shift+Enter adds a line. Scrolling upward pauses automatic following; **Jump to latest** resumes it.
 
-**0.1.2** includes permissions, quick context suggestions, animations, persistent history, and the native networking fix, alongside the multi-provider login list and thinking-effort selector introduced in 0.1.1. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
+**0.1.3** adds progressive response animations, the README notebook logo throughout the app, and compact sent-attachment labels. It includes the permissions, quick context suggestions, persistent history, and native networking fix from 0.1.2. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
 
 ## Get started
 
@@ -134,6 +135,8 @@ Permission changes are locked during a run. New conversations reset to **Ask bef
 ### Quick context and skills
 
 Type `@` in the composer and filter by a note or folder path, including spaces and nested paths. Use the arrow keys and Enter, or click a result. Selecting a folder attaches snapshots of permitted Markdown notes in that folder and its descendants; non-Markdown and restricted paths are excluded. Duplicate attachments are skipped, and unreadable, moved, or oversized notes are reported. The attachment status shows the result. Remove individual draft chips before sending if you do not want to include them.
+
+After sending, your message shows the prompt plus compact file/skill labels, not the expanded context payload. Click a file label to open the note. The model still receives the attached snapshots, and saved model context still contains them; hiding the payload in the chat is a presentation change, not a privacy filter. Older saved transcripts retain their original display text.
 
 Type `/` at the start of a draft to choose a skill. Selection inserts `/skill:name `; add arguments and then send. It does not submit the prompt automatically. Escape dismisses suggestions; Shift+Enter inserts a newline.
 
