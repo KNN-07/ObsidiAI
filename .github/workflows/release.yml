@@ -44,6 +44,12 @@ jobs:
         run: |
           node scripts/check-release.mjs
           test -s ".github/release-notes/${RELEASE_TAG}.md"
+      - name: Package manual-install ZIP
+        run: |
+          mkdir -p release/obsidiai
+          cp main.js manifest.json styles.css release/obsidiai/
+          cd release
+          zip -X "../obsidiai-${RELEASE_TAG}.zip" obsidiai/main.js obsidiai/manifest.json obsidiai/styles.css
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,9 +60,9 @@ jobs:
               echo "Refusing to overwrite an already published release."
               exit 1
             fi
-            gh release upload "$RELEASE_TAG" main.js manifest.json styles.css --clobber
+            gh release upload "$RELEASE_TAG" main.js manifest.json styles.css "obsidiai-${RELEASE_TAG}.zip" --clobber
           else
-            gh release create "$RELEASE_TAG" main.js manifest.json styles.css \
+            gh release create "$RELEASE_TAG" main.js manifest.json styles.css "obsidiai-${RELEASE_TAG}.zip" \
               --verify-tag --draft --title "ObsidiAI ${RELEASE_TAG}" \
               --notes-file ".github/release-notes/${RELEASE_TAG}.md"
           fi

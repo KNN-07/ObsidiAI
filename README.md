@@ -51,21 +51,18 @@ Provider availability is not a promise of account access. Subscription eligibili
 
 ### Install a release
 
-Download **main.js**, **manifest.json**, and **styles.css** from the [latest GitHub release](https://github.com/KNN-07/ObsidiAI/releases/latest). Use the individual release assets, not GitHub's automatic source archives. No local build or Node installation is needed to install these files; Obsidian's embedded Node requirement still applies.
+Download **`obsidiai-<version>.zip`** from the [latest GitHub release](https://github.com/KNN-07/ObsidiAI/releases/latest). This is the ready-to-install plugin—not GitHub's automatic “Source code (zip)” archive. No local build or Node installation is needed; Obsidian's embedded Node requirement still applies.
 
-Create this folder in a **disposable test vault**:
+Extract the ZIP into a **disposable test vault's** `.obsidian/plugins/` directory. It contains an `obsidiai` folder, giving you this layout:
 
 ```text
 <test-vault>/.obsidian/plugins/obsidiai/
+  main.js
+  manifest.json
+  styles.css
 ```
 
-Copy the three downloaded files into it:
-
-```text
-main.js
-manifest.json
-styles.css
-```
+Alternatively, download the three individual assets—`main.js`, `manifest.json`, and `styles.css`—and put them in that folder. They remain available for Obsidian's plugin installer.
 
 Application dependencies are bundled into `main.js`; do not copy `node_modules`.
 
@@ -171,7 +168,7 @@ To prepare a release:
 3. Run `npm run build`, `npm test`, and `npm run check:release`. Commit and push the changes.
 4. Push an annotated tag matching the manifest version exactly—such as `0.1.0`, **not** `v0.1.0`.
 
-The Release workflow reruns the shared CI checks, downloads the tested artifact, and publishes the three plugin assets. A draft is published only after asset upload succeeds. Published releases are not overwritten; fix a failed draft by rerunning its workflow, or ship a new version for changes to an existing public release.
+The Release workflow reruns the shared CI checks, downloads the tested artifact, and publishes both the three individual plugin assets and `obsidiai-<version>.zip` containing the ready-to-copy plugin folder. A draft is published only after asset upload succeeds. Published releases are not overwritten by the workflow; fix a failed draft by rerunning its workflow, or ship a new version for changes to an existing public release.
 
 ## Feedback
 
