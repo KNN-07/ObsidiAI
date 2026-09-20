@@ -152,6 +152,7 @@
 .obsidiai-message { margin-bottom: 28px; line-height: 1.7; font-size: 15px; }
 .obsidiai-message:last-child { margin-bottom: 0; }
 .obsidiai-message-body { white-space: pre-wrap; }
+.obsidiai-message-body, .obsidiai-tool-body { user-select: text; }
 .obsidiai-user { width: fit-content; max-width: 86%; margin-left: auto; padding: 12px 18px; border: 1px solid var(--background-modifier-border); border-radius: 16px 16px 4px 16px; background: var(--background-secondary); }
 .obsidiai-sent-context { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .obsidiai-sent-attachment { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border: 1px solid var(--background-modifier-border); border-radius: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.4; text-decoration: none; }
