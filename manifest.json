@@ -1,7 +1,7 @@
 {
   "id": "obsidiai",
   "name": "ObsidiAI",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": "ObsidiAI contributors",
   "description": "A native AI agent tab powered by pi, with approval-based note editing.",
   "minAppVersion": "1.11.4",

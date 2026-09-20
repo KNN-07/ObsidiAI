@@ -55,7 +55,7 @@ describe("real Agent conversation settlement", () => {
   await next.controller.send("What changed?");
   expect(context?.messages.some(m => m.role === "toolResult")).toBe(true);
   expect(context?.messages.some(m => m.role === "assistant" && m.content.some(c => c.type === "toolCall"))).toBe(true);
-  await next.controller.deleteConversation(saved!.id);
+  await next.controller.deleteConversations([saved!.id]);
   await next.controller.dispose();
   expect(await new HistoryStore(adapter, "history.json").list()).toEqual([]);
   expect(bytes).not.toContain("Review it");
@@ -68,7 +68,7 @@ describe("real Agent conversation settlement", () => {
   f.faux.setResponses([fauxAssistantMessage(fauxToolCall("approved_edit", {}))]);
   const run = f.controller.send("Pending change"); await f.approvalReady;
   await expect(f.controller.openConversation("other")).rejects.toThrow("settle");
-  await expect(f.controller.deleteConversation("other")).rejects.toThrow("settle");
+  await expect(f.controller.deleteConversations(["other"])).rejects.toThrow("settle");
   await f.controller.reset(); await run; f.approve();
   expect(f.content()).toBe("Status: draft");
   expect(f.controller.timeline).toEqual([]);
@@ -96,14 +96,16 @@ describe("real Agent conversation settlement", () => {
   await f.controller.send("Continue.");
   await f.controller.dispose();
  });
- it("waits for an in-flight deletion during disposal without writing the deleted chat back", async () => {
+ it("waits for an in-flight batch deletion during disposal without resurrecting the active chat", async () => {
   let bytes = ""; let block = false;
   const entered = Promise.withResolvers<void>(); const gate = Promise.withResolvers<void>();
   const history = new HistoryStore({ async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path, value) { if (block) { entered.resolve(); await gate.promise; } bytes = value; } }, "history.json");
   const f = fixture({}, history); await f.configure();
-  f.faux.setResponses([fauxAssistantMessage("Saved.")]); await f.controller.send("Question");
-  const [saved] = await history.list(); block = true;
-  const deletion = f.controller.deleteConversation(saved!.id); await entered.promise;
+  f.faux.setResponses([fauxAssistantMessage("Saved first.")]); await f.controller.send("Question one");
+  await f.controller.reset();
+  f.faux.setResponses([fauxAssistantMessage("Saved second.")]); await f.controller.send("Question two");
+  const saved = await history.list(); block = true;
+  const deletion = f.controller.deleteConversations(saved.map(chat => chat.id)); await entered.promise;
   let disposed = false; const disposal = f.controller.dispose().then(() => { disposed = true; });
   await Promise.resolve(); expect(disposed).toBe(false);
   gate.resolve(); await deletion; await disposal;

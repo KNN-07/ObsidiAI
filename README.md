@@ -49,7 +49,7 @@ Try prompts like:
 | **Reuse skills** | Keep instruction-only skills in your vault and choose them from the Skills picker or with `/skill:name`. |
 | **Manage community plugins** | Browse the official catalog and propose install, update, enable, disable, or uninstall operations—with separate approval for each change. |
 | **Quickly include context** | Type `@` to attach notes/folders or `/` for skills. Optionally enable **Open notes** to capture open Markdown tabs when you send. |
-| **Resume conversations** | Open saved chats from History, continue with your current model, or delete the plugin's saved copy. |
+| **Resume and organize conversations** | Search saved chats in the integrated History screen, continue with your current model, or select several chats for confirmed bulk deletion. |
 | **Inspect tool activity** | Expand or collapse tool-call chains and individual results. Pending approvals stay visible outside collapsed groups. |
 
 Provider availability is not a promise of account access. Subscription eligibility, provider policy, credentials, and network conditions still apply. Graph and metadata results identify partial or provisional cache state rather than treating it as definitive vault truth.
@@ -66,7 +66,7 @@ The source build uses a Claude-inspired arrangement with restrained, shadcn-styl
 - **Follow a live answer.** Incoming text gently fades into place while earlier text stays stable. The notebook logo and Thinking indicator pulse while streaming; completed Markdown has a brief transition. Reduced-motion preferences disable these effects.
 - **Use any pane width.** The layout adapts to narrow split panes and Obsidian's light/dark themes. Enter sends; Shift+Enter adds a line. Scrolling upward pauses automatic following; **Jump to latest** resumes it.
 
-**0.1.4** adds file-tree browsing, optional automatic open-note context, collapsible tool chains, and inline note/plugin approvals. It retains the streaming animations, shared notebook logo, compact sent-attachment labels, permissions, persistent history, and native networking fixes from previous releases. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
+**0.1.5** adds an integrated History screen with search, date groups, and multi-select deletion. It retains file-tree browsing, optional open-note context, collapsible tool chains, inline approvals, and native networking fixes from previous releases. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
 
 ## Get started
 
@@ -151,11 +151,15 @@ Type `/` at the start of a draft to choose a skill. Selection inserts `/skill:na
 
 ### Saved conversations
 
-The **History** button beside **New conversation** lists saved conversations by title and date. Conversations are saved after a response settles, including tool results and sent context. **New conversation** keeps the previous chat in history. **Open** restores its transcript and model context; the next request uses your currently selected provider/model, as disclosed in the dialog. Permissions reset to **Ask before changes**.
+The **History** button beside **New conversation** opens saved chats in an integrated screen inside the chat tab, matching its typography, spacing, and light/dark themes instead of opening a popup. Search titles, providers, or models; browse Today, Yesterday, Previous 7 days, and Earlier groups. Long lists show 50 conversations at a time with **Show more**; search covers all saved conversations.
+
+Click a conversation—or press Enter in search to open its first result—to restore its transcript and model context. Future requests use your currently selected provider/model; permissions reset to **Ask before changes**. **Back to chat** or Escape returns without opening a different conversation and preserves your unsent draft. Conversations are saved after a response settles, including tool results and sent context. **New conversation** keeps the previous chat in history.
 
 **Storage:** `.obsidian/plugins/obsidiai/history.json` by default (or your custom vault configuration folder). History is separate from credentials and settings, but it can contain sent note excerpts, skill instructions, and tool results. The plugin does not encrypt this file; vault sync and backups may copy it. Unsent draft attachments/skill selections and elevated permission modes are not stored. Saved provider credentials are not included.
 
-Choose **Delete**, then **Delete permanently**, to remove a conversation from the plugin's history. Copies already synced or backed up are outside that deletion. If reading or saving fails, the UI reports it rather than silently replacing unreadable history.
+Use a row’s trash button, then **Delete permanently** in its inline confirmation, to remove one saved chat. Or choose **Select chats**, check several conversations, and click **Delete selected**. **Select all results** includes every search match, even beyond the first 50 displayed rows. Selections survive filtering; the selected count identifies chats outside the current filter. **Clear selection** clears every selection; **Done** leaves selection mode.
+
+Bulk deletion previews the selected titles and total before **Delete N permanently**. **Keep chats** or Escape cancels confirmation without losing the selection; another Escape leaves selection mode. Search Enter does not open a conversation while selecting. Selected removals are persisted together in one write, not a series of individual deletions. A failed write keeps the selection and shows an error for retry; the UI does not report success. Deleting the active chat resets it only after the save succeeds; deleting other chats leaves it intact. Copies already synced or backed up are outside deletion. Read failures have a retry action.
 
 <details>
 <summary>Saved provider logins in the native settings dialog</summary>
@@ -202,7 +206,7 @@ Selecting a skill adds a removable draft chip. Skill resources are restricted to
 
 - **Context goes to your selected provider.** After you send a prompt, the agent can read permitted notes, metadata, graph data, skills, and non-secret plugin manifests and include returned context in model requests. Attaching a note is not a limit on the other notes it may inspect during that run.
 - **No background vault uploads or embeddings.** There is no second persisted search index.
-- **Conversation history is stored in the plugin folder.** Settled transcripts, sent context, and tool results are persisted to `history.json`, not plugin settings. Unsent drafts remain in memory. History can be reopened or deleted through the native dialog; see the storage/sync warning above.
+- **Conversation history is stored in the plugin folder.** Settled transcripts, sent context, and tool results are persisted to `history.json`, not plugin settings. Unsent drafts remain in memory. History can be reopened or deleted through the History screen; see the storage/sync warning above.
 - **Plugin credentials use Obsidian SecretStorage.** Non-secret preferences are saved separately. ObsidiAI does not automatically import pi CLI credentials from `~/.pi/agent/auth.json`; provider-supported ambient environment/profile authentication remains available.
 - **You control note permissions.** Each new conversation defaults to individual approval; Read-only blocks changes, while Auto-approve notes skips only note approval cards. Plugin changes always need individual approval. Edits remain bound to a current-run snapshot and checked for conflicts with both saved notes and open editor buffers.
 - **Stop is not undo.** It prevents pending approvals and subsequent work, but an atomic write or native plugin operation already in progress may finish. Applied changes stay applied.

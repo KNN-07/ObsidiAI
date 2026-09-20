@@ -192,13 +192,15 @@ export class AgentController {
     : "Reopened chat. Select an available provider and model in Settings to resume; the original model is not automatically selected.";
   } finally { this.historyBusy = false; settlement.resolve(); this.emit(); }
  }
- async deleteConversation(id: string): Promise<void> {
+ async deleteConversations(ids: readonly string[]): Promise<void> {
   if (!this.idle) throw new Error("Wait for the current run to settle.");
   if (!this.history) throw new Error("Chat history storage is unavailable.");
+  if (!ids.length) return;
+  const selected = [...ids];
   this.historyBusy = true;
   const settlement = Promise.withResolvers<void>(); this.historySettled = settlement.promise;
   this.emit();
-  try { await this.history.delete(id); if (id === this.conversationId) this.clearConversation(); }
+  try { await this.history.delete(selected); if (selected.includes(this.conversationId)) this.clearConversation(); }
   finally { this.historyBusy = false; settlement.resolve(); this.emit(); }
  }
  private clearConversation(): void {

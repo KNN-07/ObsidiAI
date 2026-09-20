@@ -8,7 +8,7 @@ import { validateVaultPath } from "../vault/paths";
 import type { PermissionMode } from "./approval";
 import { renderApprovalCard } from "./approval-card";
 import { ComposerSuggest, type ComposerChoice, type ComposerTrigger } from "./composer-suggest";
-import { ChatHistoryModal } from "./history-modal";
+import { ChatHistoryView } from "./history-view";
 
 export const AGENT_VIEW_TYPE = "obsidiai-agent";
 export interface AgentViewHost extends SettingsHost {
@@ -114,7 +114,8 @@ export class AgentView extends ItemView {
  private newButton?: ButtonComponent;
  private jump?: ButtonComponent;
  private historyButton?: ButtonComponent;
- private historyModal?: ChatHistoryModal;
+ private historyView?: ChatHistoryView;
+ private chatStage?: HTMLElement;
  private composerSuggest?: ComposerSuggest;
  private contextModal?: { close(): void };
  private attachmentEpoch = 0;
@@ -155,15 +156,19 @@ export class AgentView extends ItemView {
     void controller.reset().then(() => {
      if (!this.textarea || this.closed) return;
      this.excludedOpenNotes.clear();
+     this.closeHistory(true);
      this.textarea.value = ""; this.attachmentStatus?.empty(); this.resizeComposer(); this.textarea.focus(); this.schedule();
     }).catch(error => { if (!this.closed) new Notice(error instanceof Error ? error.message : "Could not start a new conversation. Your current chat is retained."); });
    });
    this.historyButton = this.iconButton(headerActions, "Conversation history", "history", () => {
     if (!controller.idle || this.attachmentPending) return;
-    this.attachmentEpoch++; this.composerSuggest?.dismiss();
-    this.excludedOpenNotes.clear();
-    this.historyModal = new ChatHistoryModal(this.app, controller); this.historyModal.open();
+    if (this.historyView?.isVisible) { this.closeHistory(); return; }
+    this.attachmentEpoch++; this.composerSuggest?.dismiss(); this.contextModal?.close();
+    this.chatStage!.hidden = true;
+    this.historyButton!.buttonEl.setAttr("aria-pressed", "true");
+    this.historyView?.show();
    });
+   this.historyButton.buttonEl.setAttr("aria-pressed", "false");
   }
   this.iconButton(headerActions, "Settings", "settings-2", () => new ConnectionSettingsModal(this.app, this.host).open());
   if (!controller) {
@@ -176,6 +181,9 @@ export class AgentView extends ItemView {
   }
 
   const stage = this.contentEl.createDiv({ cls: "obsidiai-stage" });
+  this.chatStage = stage;
+  this.historyView = new ChatHistoryView(this.contentEl.createDiv(), controller, opened => this.closeHistory(opened));
+  this.addChild(this.historyView);
   this.scrollEl = stage.createDiv({ cls: "obsidiai-scroll" });
   this.emptyEl = this.scrollEl.createDiv({ cls: "obsidiai-welcome" });
   setIcon(this.emptyEl.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
@@ -268,6 +276,14 @@ export class AgentView extends ItemView {
   this.render();
  }
 
+ private closeHistory(opened = false): void {
+  if (this.closed || !this.historyView?.isVisible) return;
+  this.historyView.hide(); this.chatStage!.hidden = false;
+  this.historyButton!.buttonEl.setAttr("aria-pressed", "false");
+  if (opened) { this.excludedOpenNotes.clear(); this.followLatest = true; this.textarea?.focus(); }
+  else this.historyButton!.buttonEl.focus();
+  this.schedule();
+ }
  async chooseSkill(): Promise<void> {
   try {
    const epoch = this.attachmentEpoch;
@@ -715,7 +731,8 @@ export class AgentView extends ItemView {
  }
  private release(): void {
   this.closed = true;
-  this.attachmentEpoch++; this.composerSuggest?.dispose(); this.contextModal?.close(); this.historyModal?.close();
+  this.attachmentEpoch++; this.composerSuggest?.dispose(); this.contextModal?.close();
+  if (this.historyView) { this.removeChild(this.historyView); this.historyView = undefined; }
   this.modelProbe?.abort(); this.selectionModal?.close();
   this.unsubscribe?.(); this.hostUnsubscribe?.(); this.connectionUnsubscribe?.();
   this.resizeObserver?.disconnect();

@@ -28,6 +28,62 @@
 .obsidiai-agent button.obsidiai-icon-button { display: inline-flex; flex-shrink: 0; justify-content: center; align-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--text-muted); }
 .obsidiai-agent button.obsidiai-icon-button:hover:not(:disabled) { color: var(--text-normal); background: var(--background-modifier-hover); }
 .obsidiai-icon-button svg { width: 17px; height: 17px; }
+.obsidiai-header-actions button[aria-pressed="true"] { background: var(--background-modifier-hover); color: var(--text-normal); }
+.obsidiai-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.obsidiai-history-column { width: min(100% - 48px, var(--obsidiai-column)); margin: 0 auto; padding: 12px 0 32px; }
+.obsidiai-history-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+.obsidiai-history-heading h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 36px; font-weight: 400; letter-spacing: -.035em; line-height: 1.2; }
+.obsidiai-history-heading p { margin: 10px 0 24px; color: var(--text-muted); font-size: 13px; }
+.obsidiai-history-search { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-primary-alt, var(--background-primary)); }
+.obsidiai-history-search:focus-within { border-color: var(--background-modifier-border-focus, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
+.obsidiai-history-search > span { display: flex; flex-shrink: 0; color: var(--text-muted); }
+.obsidiai-history-search svg { width: 16px; height: 16px; }
+.obsidiai-agent .obsidiai-history-search input { flex: 1; width: 100%; min-width: 0; height: 24px; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--text-normal); font-size: 13px; outline: none; }
+.obsidiai-history-count { margin: 12px 2px 20px; color: var(--text-faint); font-size: 11px; }
+.obsidiai-history-selection { margin: 0 0 20px; padding: 14px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-primary-alt, var(--background-primary)); }
+.obsidiai-history-selected-count { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.obsidiai-history-selection-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.obsidiai-history-selection-actions button { font-size: 12px; }
+.obsidiai-history-bulk-confirm { margin-top: 12px; }
+.obsidiai-history-bulk-confirm h3 { margin: 0 0 6px; font-size: 14px; }
+.obsidiai-history-bulk-confirm p, .obsidiai-history-bulk-confirm ul { margin: 8px 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.obsidiai-history-bulk-confirm ul { padding-left: 20px; }
+.obsidiai-history-row[data-selected="true"] { background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary)); }
+.obsidiai-history-open input[type="checkbox"] { flex-shrink: 0; width: 16px; height: 16px; margin: 0; }
+.obsidiai-history-group { margin-bottom: 24px; }
+.obsidiai-history-group h2 { margin: 0 0 10px 2px; color: var(--text-muted); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.obsidiai-history-rows { overflow: hidden; border: 1px solid var(--background-modifier-border); border-radius: 12px; }
+.obsidiai-history-row { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; background: var(--background-primary-alt, var(--background-primary)); }
+.obsidiai-history-row + .obsidiai-history-row { border-top: 1px solid var(--background-modifier-border); }
+.obsidiai-history-row:hover, .obsidiai-history-row:focus-within { background: var(--background-modifier-hover); }
+.obsidiai-agent .obsidiai-history-open { display: flex; align-items: center; flex: 1; gap: 12px; min-width: 0; height: auto; padding: 12px; border: 0; border-radius: 8px; background: transparent; box-shadow: none; color: var(--text-normal); text-align: left; cursor: pointer; }
+.obsidiai-agent button.obsidiai-history-open:focus-visible { outline-offset: -2px; }
+.obsidiai-history-row-icon { display: flex; flex-shrink: 0; color: var(--text-faint); }
+.obsidiai-history-row-icon svg { width: 17px; height: 17px; }
+.obsidiai-history-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 5px; }
+.obsidiai-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; line-height: 1.5; }
+.obsidiai-history-meta { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
+.obsidiai-history-model { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obsidiai-history-date { flex-shrink: 0; color: var(--text-faint); }
+.obsidiai-history-delete { opacity: 0; }
+.obsidiai-history-row:hover .obsidiai-history-delete, .obsidiai-history-row:focus-within .obsidiai-history-delete { opacity: 1; }
+.obsidiai-agent button.obsidiai-history-delete:hover:not(:disabled) { color: var(--text-error); }
+.obsidiai-history-empty { padding: 40px 16px; text-align: center; }
+.obsidiai-history-empty-icon { color: var(--text-faint); }
+.obsidiai-history-empty-icon svg { width: 28px; height: 28px; }
+.obsidiai-history-empty h2 { margin: 14px 0 8px; font-size: 16px; font-weight: 500; }
+.obsidiai-history-empty p { margin: 0 0 16px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.obsidiai-history-row.obsidiai-history-confirming { align-items: stretch; flex-direction: column; padding: 16px; }
+.obsidiai-history-confirm-copy h3 { margin: 0 0 6px; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+.obsidiai-history-confirm-copy p { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.obsidiai-history-confirm-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.obsidiai-history-confirm-actions button { font-size: 12px; }
+.obsidiai-history-more { margin: 0 auto 24px; }
+.obsidiai-history-footer { margin-top: 28px; border-top: 1px solid var(--background-modifier-border); padding-top: 14px; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.obsidiai-history-footer p { margin: 0 0 10px; }
+.obsidiai-history-footer summary { width: fit-content; cursor: pointer; color: var(--text-faint); }
+.obsidiai-history-footer details[open] summary { margin-bottom: 10px; }
+@media (hover: none) { .obsidiai-history-delete { opacity: 1; } }
 .obsidiai-stage { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .obsidiai-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .obsidiai-timeline { width: min(100% - 48px, var(--obsidiai-column)); margin: 0 auto; padding: 24px 0 32px; overflow-wrap: anywhere; }
@@ -153,6 +209,12 @@
 .obsidiai-unavailable p { max-width: 420px; margin: 16px 0 24px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 @container obsidiai (max-width: 520px) {
  .obsidiai-header { min-height: 48px; padding: 8px 12px; }
+ .obsidiai-history-column { width: calc(100% - 28px); }
+ .obsidiai-history-toolbar { margin-bottom: 20px; }
+ .obsidiai-history-heading h1 { font-size: 30px; }
+ .obsidiai-history-meta { align-items: flex-start; flex-direction: column; gap: 2px; }
+ .obsidiai-history-model { max-width: 100%; }
+ .obsidiai-history-delete { opacity: 1; }
  .obsidiai-status { font-size: 10px; }
  .obsidiai-timeline, .obsidiai-welcome, .obsidiai-compose-region { width: calc(100% - 28px); }
  .obsidiai-welcome { padding-top: 20px; padding-bottom: 20px; }

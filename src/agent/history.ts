@@ -12,7 +12,7 @@ export interface ConversationHistory {
  list(): Promise<ConversationSummary[]>;
  get(id: string): Promise<Conversation>;
  save(conversation: Conversation): Promise<void>;
- delete(id: string): Promise<void>;
+ delete(ids: readonly string[]): Promise<void>;
 }
 const FAILURE = "Chat history could not be read or saved. Check plugin-folder access and available disk space. Existing history has not been intentionally replaced.";
 
@@ -52,7 +52,15 @@ export class HistoryStore implements ConversationHistory {
   const copy = structuredClone(conversation);
   return this.operation(async () => { const next = (await this.load()).filter(c => c.id !== copy.id); next.push(copy); await this.persist(next); });
  }
- delete(id: string): Promise<void> { return this.operation(async () => { await this.persist((await this.load()).filter(c => c.id !== id)); }); }
+ delete(ids: readonly string[]): Promise<void> {
+  const selected = new Set(ids);
+  if (!selected.size) return Promise.resolve();
+  return this.operation(async () => {
+   const records = await this.load();
+   const next = records.filter(c => !selected.has(c.id));
+   if (next.length !== records.length) await this.persist(next);
+  });
+ }
  private async persist(next: Conversation[]): Promise<void> {
   await this.adapter.write(this.path, JSON.stringify({ version: 1, conversations: next }));
   this.records = next;
