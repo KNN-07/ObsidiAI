@@ -9,8 +9,10 @@ ObsidiAI is a desktop-only Obsidian plugin providing a native workspace AI-agent
 - `src/main.ts` is the composition/lifecycle root. It persists settings, checks embedded Node compatibility **before dynamically importing the agent runtime**, constructs services, and registers the native view, commands, and settings.
 - `src/agent/runtime.ts` is the single provider factory: pi's built-in model catalog, static OAuth/Bedrock registration, and SSE transport. `credentials.ts` serializes credential mutations into one plugin-owned Obsidian SecretStorage entry.
 - `src/agent/controller.ts` coordinates one real pi `Agent` and sequential tools. Draft attachments/selected skills become untrusted user context on Send; agent events become timeline items in `src/ui/agent-view.ts`. Run states are `idle`, `running`, `awaiting-approval`, and `stopping`.
+- Thinking effort uses pi's `getSupportedThinkingLevels` and `clampThinkingLevel`. Settings persist the preferred level; the controller exposes the effective level for the selected model and applies it to the existing Agent without resetting the conversation.
 - Note/plugin services request decisions from the shared `ApprovalController`. Modals return decisions only; services revalidate reviewed state and perform native mutations. Stop cancels pending decisions and waits for settlement; it is not rollback after a write/native operation starts.
 - Settings alone go through serialized `saveSettings()`. Conversations, attachments, proposals, and run snapshots stay in memory. Credentials never belong in `data.json`, transcripts, tool results, or logs.
+- Provider login management is separate from active chat selection: one saved credential per provider, with shared `runConnectionOperation` serialization for authentication/model/effort changes. Pi spreads `AuthInteraction`; keep `AuthModal.prompt` and `notify` as own, bound callbacks.
 
 ## Key Directories
 
@@ -19,6 +21,7 @@ ObsidiAI is a desktop-only Obsidian plugin providing a native workspace AI-agent
 - `src/vault/`, `src/skills/`, `src/plugins/`: shared path policy, vault-local skill discovery, and isolated native plugin-manager/release boundaries.
 - `.github/workflows/`: shared CI and tag-triggered publication; `.github/release-notes/` holds reviewed per-version notes. `scripts/check-release.mjs` validates release metadata and built assets.
 - `tests/`: behavioral suites; `tests/fixtures/knowledge.ts` shares metadata/graph host doubles. Other fixtures are mostly suite-local.
+- `assets/`: README logo and screenshots captured in a disposable native Obsidian host. Preview providers and sample conversations are not remote-provider verification.
 
 ## Development Commands
 

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">ObsidiAI</title>
+  <desc id="desc">An open notebook with a copper sparkle, on a rounded charcoal tile.</desc>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#242321" stroke="#3b3935" stroke-width="1.5"/>
+  <g fill="none" stroke="#f4efe7" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M27 43c13-5 24-3 35 4v46c-11-8-22-10-35-5V43Z"/>
+    <path d="M62 47c11-7 22-9 35-4v45c-13-5-24-3-35 5"/>
+    <path d="M36 56c6-1 11 0 17 3m-17 9c6-1 11 0 17 3" stroke="#a8a197" stroke-width="2.5"/>
+  </g>
+  <path d="m94 16 4.5 13.5L112 34l-13.5 4.5L94 52l-4.5-13.5L76 34l13.5-4.5L94 16Z" fill="#c07856" stroke="#242321" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="109" cy="19" r="2.5" fill="#c07856"/>
+</svg>

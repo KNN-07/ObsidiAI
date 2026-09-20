@@ -1,7 +1,9 @@
-import { ButtonComponent, Component, FuzzySuggestModal, ItemView, MarkdownRenderer, Notice, TFile, type App, type WorkspaceLeaf } from "obsidian";
-import type { Model, Api } from "@earendil-works/pi-ai";
+import { ButtonComponent, Component, FuzzySuggestModal, ItemView, MarkdownRenderer, Notice, TFile, setIcon } from "obsidian";
+import type { App, WorkspaceLeaf } from "obsidian";
+import type { Model, Api, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { AgentController, TimelineItem } from "../agent/controller";
-import { ConnectionSettingsModal, getConnectionBusy, subscribeConnectionState, type SettingsHost } from "../settings";
+import { ConnectionSettingsModal, getConnectionBusy, runConnectionOperation, subscribeConnectionState } from "../settings";
+import type { SettingsHost } from "../settings";
 import { validateVaultPath } from "../vault/paths";
 
 export const AGENT_VIEW_TYPE = "obsidiai-agent";
@@ -17,123 +19,418 @@ class ChoiceModal<T> extends FuzzySuggestModal<T> {
  getItemText(item: T): string { return this.label(item); }
  onChooseItem(item: T): void { this.choose(item); }
 }
+const THINKING_LABELS: Record<ModelThinkingLevel, string> = {
+ off: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum",
+};
+interface RenderedMessage {
+ el: HTMLElement;
+ body: HTMLElement;
+ text: Text;
+ last: string;
+ complete: boolean;
+ component?: Component;
+ status?: HTMLElement;
+ context?: HTMLElement;
+ notice?: HTMLElement;
+}
+const TOOL_PRESENTATION: Record<string, { label: string; icon: string }> = {
+ search_notes: { label: "Searching notes", icon: "search" },
+ read_note: { label: "Reading a note", icon: "file-text" },
+ propose_note_edit: { label: "Note edit", icon: "file-pen-line" },
+ propose_note_create: { label: "New note", icon: "file-plus-2" },
+ get_vault_info: { label: "Vault overview", icon: "vault" },
+ get_note_metadata: { label: "Note metadata", icon: "tags" },
+ query_notes: { label: "Finding notes", icon: "list-filter" },
+ query_graph: { label: "Exploring connections", icon: "network" },
+ list_skills: { label: "Available skills", icon: "sparkles" },
+ load_skill: { label: "Loading a skill", icon: "sparkles" },
+ read_skill_resource: { label: "Skill reference", icon: "book-open" },
+ list_plugins: { label: "Installed plugins", icon: "blocks" },
+ search_community_plugins: { label: "Finding plugins", icon: "blocks" },
+ get_plugin_details: { label: "Plugin details", icon: "blocks" },
+ propose_plugin_change: { label: "Plugin change", icon: "shield-alert" },
+};
+const STATUS_LABELS: Record<string, string> = {
+ running: "Working", "awaiting-approval": "Needs approval", stopping: "Stopping",
+ success: "Done", applied: "Applied", unchanged: "Unchanged", rejected: "Rejected",
+ cancelled: "Cancelled", aborted: "Stopped", error: "Error", failed: "Failed", conflict: "Conflict",
+};
+
 export class AgentView extends ItemView {
  navigation = false;
  private unsubscribe?: () => void;
  private hostUnsubscribe?: () => void;
  private connectionUnsubscribe?: () => void;
  private frame?: number;
+ private resizeObserver?: ResizeObserver;
+ private closed = false;
+ private followLatest = true;
+ private scrollViewportWidth = 0;
+ private scrollViewportHeight = 0;
+ private scrollEl?: HTMLElement;
  private timelineEl?: HTMLElement;
+ private emptyEl?: HTMLElement;
+ private setupEl?: HTMLElement;
+ private setupText?: HTMLElement;
  private chips?: HTMLElement;
  private textarea?: HTMLTextAreaElement;
  private statusEl?: HTMLElement;
  private modelButton?: ButtonComponent;
+ private modelLabel?: HTMLElement;
+ private thinkingButton?: ButtonComponent;
+ private thinkingLabel?: HTMLElement;
+ private modelProbe?: AbortController;
+ private selectionModal?: FuzzySuggestModal<Model<Api>> | FuzzySuggestModal<ModelThinkingLevel>;
  private sendButton?: ButtonComponent;
  private stopButton?: ButtonComponent;
  private newButton?: ButtonComponent;
  private jump?: ButtonComponent;
- private rendered = new Map<string, { el: HTMLElement; text: Text; last: string; complete: boolean; component?: Component }>();
+ private readonly rendered = new Map<string, RenderedMessage>();
+ private readonly draftChips = new Map<string, HTMLButtonElement>();
  constructor(leaf: WorkspaceLeaf, private readonly host: AgentViewHost) { super(leaf); }
  getViewType(): string { return AGENT_VIEW_TYPE; }
  getDisplayText(): string { return "ObsidiAI"; }
  getIcon(): string { return "bot"; }
- async onOpen(): Promise<void> {
-  this.contentEl.empty(); this.contentEl.addClass("obsidiai-agent");
-  if (!this.host.controller) { this.contentEl.createEl("h2", { text: "ObsidiAI" }); this.contentEl.createEl("p", { text: this.host.disabledReason || "Agent initialization is unavailable." }); new ButtonComponent(this.contentEl).setButtonText("Settings").onClick(() => new ConnectionSettingsModal(this.app, this.host).open()); return; }
-  const controller = this.host.controller;
-  const toolbar = this.contentEl.createDiv({ cls: "obsidiai-toolbar" });
-  this.modelButton = new ButtonComponent(toolbar).setButtonText("Choose model").onClick(() => { void this.chooseModel(); });
-  this.newButton = new ButtonComponent(toolbar).setButtonText("New conversation").onClick(() => { void controller.reset(); });
-  new ButtonComponent(toolbar).setButtonText("Settings").onClick(() => new ConnectionSettingsModal(this.app, this.host).open());
-  this.statusEl = this.contentEl.createDiv({ cls: "obsidiai-status", attr: { role: "status" } });
-  this.contentEl.createEl("p", { cls: "obsidiai-disclosure", text: "On Send, this agent may inspect vault notes, metadata, graph structure, skill instructions, and non-secret plugin manifests and send returned context to your selected provider. Note edits and plugin changes each require approval. Installing or enabling community plugins can run third-party code with Obsidian privileges. Conversations stay in memory." });
-  this.timelineEl = this.contentEl.createDiv({ cls: "obsidiai-timeline", attr: { "aria-label": "Conversation" } });
-  this.jump = new ButtonComponent(this.contentEl).setButtonText("Jump to latest").onClick(() => { this.timelineEl!.scrollTop = this.timelineEl!.scrollHeight; this.jump!.buttonEl.hide(); }); this.jump.buttonEl.hide();
-  this.chips = this.contentEl.createDiv({ cls: "obsidiai-chips" });
-  this.textarea = this.contentEl.createEl("textarea", { cls: "obsidiai-composer", placeholder: "Ask about your vault…", attr: { "aria-label": "Message" } });
-  this.registerDomEvent(this.textarea, "keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void this.send(); } });
-  const actions = this.contentEl.createDiv({ cls: "obsidiai-actions" });
-  new ButtonComponent(actions).setButtonText("Attach note").onClick(() => this.attachNote());
-  new ButtonComponent(actions).setButtonText("Skills").onClick(() => { void this.chooseSkill(); });
-  this.sendButton = new ButtonComponent(actions).setButtonText("Send").setCta().onClick(() => { void this.send(); });
-  this.stopButton = new ButtonComponent(actions).setButtonText("Stop").onClick(() => { void controller.stop(); });
-  this.unsubscribe = controller.subscribe(() => this.schedule()); this.hostUnsubscribe = this.host.subscribe(() => this.schedule()); this.render();
-  this.connectionUnsubscribe = subscribeConnectionState(this.host, () => this.schedule());
+
+ private iconButton(container: HTMLElement, label: string, icon: string, action: () => void): ButtonComponent {
+  const button = new ButtonComponent(container).setIcon(icon).setTooltip(label).onClick(action);
+  button.buttonEl.addClass("obsidiai-icon-button");
+  button.buttonEl.setAttrs({ "aria-label": label, type: "button" });
+  return button;
  }
+
+ async onOpen(): Promise<void> {
+  this.closed = false;
+  this.followLatest = true;
+  this.contentEl.empty();
+  this.contentEl.addClass("obsidiai-agent");
+  const header = this.contentEl.createDiv({ cls: "obsidiai-header" });
+  const brand = header.createDiv({ cls: "obsidiai-brand" });
+  setIcon(brand.createSpan({ cls: "obsidiai-brand-mark", attr: { "aria-hidden": "true" } }), "sparkles");
+  brand.createSpan({ text: "ObsidiAI" });
+  this.statusEl = header.createSpan({ cls: "obsidiai-status", attr: { role: "status", "aria-live": "polite" } });
+  const headerActions = header.createDiv({ cls: "obsidiai-header-actions" });
+  const controller = this.host.controller;
+  if (controller) {
+   this.newButton = this.iconButton(headerActions, "New conversation", "square-pen", () => {
+    void controller.reset().then(() => {
+     if (!this.textarea || this.closed) return;
+     this.textarea.value = ""; this.resizeComposer(); this.textarea.focus(); this.schedule();
+    });
+   });
+  }
+  this.iconButton(headerActions, "Settings", "settings-2", () => new ConnectionSettingsModal(this.app, this.host).open());
+  if (!controller) {
+   const unavailable = this.contentEl.createDiv({ cls: "obsidiai-unavailable" });
+   setIcon(unavailable.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "sparkles");
+   unavailable.createEl("h2", { text: "A little setup first." });
+   unavailable.createEl("p", { text: this.host.disabledReason || "Agent initialization is unavailable." });
+   new ButtonComponent(unavailable).setButtonText("Open settings").onClick(() => new ConnectionSettingsModal(this.app, this.host).open());
+   return;
+  }
+
+  const stage = this.contentEl.createDiv({ cls: "obsidiai-stage" });
+  this.scrollEl = stage.createDiv({ cls: "obsidiai-scroll" });
+  this.emptyEl = this.scrollEl.createDiv({ cls: "obsidiai-welcome" });
+  setIcon(this.emptyEl.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "sparkles");
+  this.emptyEl.createEl("h1", { text: "What’s on your mind?" });
+  this.emptyEl.createEl("p", { cls: "obsidiai-welcome-copy", text: "A place to think with your notes." });
+  const suggestions = this.emptyEl.createDiv({ cls: "obsidiai-suggestions" });
+  for (const suggestion of [
+   { label: "Find a note", detail: "Start with a topic", icon: "search", prompt: "Find notes related to " },
+   { label: "Connect ideas", detail: "Follow the links", icon: "network", prompt: "Help me explore connections between notes. Ask which topic I want to start with." },
+   { label: "Review a draft", detail: "Make it clearer", icon: "file-pen-line", prompt: "Help me review a note and suggest improvements. Ask which note to work on before proposing any edits." },
+  ]) {
+   const button = suggestions.createEl("button", { cls: "obsidiai-suggestion", attr: { type: "button" } });
+   setIcon(button.createSpan({ cls: "obsidiai-suggestion-icon", attr: { "aria-hidden": "true" } }), suggestion.icon);
+   const copy = button.createSpan({ cls: "obsidiai-suggestion-copy" });
+   copy.createSpan({ cls: "obsidiai-suggestion-title", text: suggestion.label });
+   copy.createSpan({ cls: "obsidiai-suggestion-detail", text: suggestion.detail });
+   this.registerDomEvent(button, "click", () => {
+    if (!this.textarea || !controller.idle) return;
+    this.textarea.value = suggestion.prompt; this.resizeComposer(); this.textarea.focus(); this.schedule();
+   });
+  }
+  this.timelineEl = this.scrollEl.createDiv({ cls: "obsidiai-timeline", attr: { "aria-label": "Conversation" } });
+  this.registerDomEvent(this.scrollEl, "scroll", () => {
+   // Pane/composer resizing is not a request to stop following the response.
+   if (this.scrollEl!.clientWidth !== this.scrollViewportWidth || this.scrollEl!.clientHeight !== this.scrollViewportHeight) { this.schedule(); return; }
+   this.followLatest = this.scrollEl!.scrollHeight - this.scrollEl!.scrollTop - this.scrollEl!.clientHeight < 80;
+   this.jump!.buttonEl.hidden = this.followLatest;
+  });
+
+  const composeRegion = stage.createDiv({ cls: "obsidiai-compose-region" });
+  this.jump = new ButtonComponent(composeRegion).setButtonText("Jump to latest").onClick(() => this.scrollToLatest());
+  this.jump.buttonEl.addClass("obsidiai-jump"); this.jump.buttonEl.hidden = true;
+  this.setupEl = composeRegion.createDiv({ cls: "obsidiai-setup", attr: { role: "status" } });
+  this.setupText = this.setupEl.createSpan();
+  const connect = new ButtonComponent(this.setupEl).setButtonText("Set up").onClick(() => new ConnectionSettingsModal(this.app, this.host).open());
+  connect.buttonEl.addClass("obsidiai-text-button");
+
+  const composer = composeRegion.createDiv({ cls: "obsidiai-composer-card" });
+  this.chips = composer.createDiv({ cls: "obsidiai-chips", attr: { "aria-label": "Draft context" } });
+  this.textarea = composer.createEl("textarea", { cls: "obsidiai-composer", attr: { placeholder: "Ask anything about your vault…", "aria-label": "Message", rows: "2" } });
+  this.registerDomEvent(this.textarea, "input", () => { this.resizeComposer(); this.schedule(); });
+  this.registerDomEvent(this.textarea, "keydown", event => {
+   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void this.send(); }
+  });
+  const actions = composer.createDiv({ cls: "obsidiai-composer-actions" });
+  const contextActions = actions.createDiv({ cls: "obsidiai-context-actions" });
+  this.iconButton(contextActions, "Attach note", "paperclip", () => this.attachNote());
+  const skills = new ButtonComponent(contextActions).onClick(() => { void this.chooseSkill(); });
+  skills.buttonEl.addClass("obsidiai-text-button");
+  setIcon(skills.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
+  skills.buttonEl.createSpan({ text: "Skills" });
+  const modelActions = actions.createDiv({ cls: "obsidiai-model-actions" });
+  this.modelButton = new ButtonComponent(modelActions).onClick(() => { void this.chooseModel(); });
+  this.modelButton.buttonEl.addClass("obsidiai-model-button");
+  this.modelLabel = this.modelButton.buttonEl.createSpan();
+  setIcon(this.modelButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "chevron-down");
+  this.thinkingButton = new ButtonComponent(modelActions).onClick(() => this.chooseThinking());
+  this.thinkingButton.buttonEl.addClass("obsidiai-thinking-button");
+  setIcon(this.thinkingButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "brain");
+  this.thinkingLabel = this.thinkingButton.buttonEl.createSpan();
+  this.sendButton = this.iconButton(modelActions, "Send message", "arrow-up", () => { void this.send(); });
+  this.sendButton.buttonEl.addClass("obsidiai-send");
+  this.stopButton = this.iconButton(modelActions, "Stop generation", "square", () => { void controller.stop(); });
+  this.stopButton.buttonEl.addClass("obsidiai-stop");
+  composeRegion.createEl("p", { cls: "obsidiai-disclosure", text: "The agent may read notes, metadata, graph links, skills, and non-secret plugin manifests and send context to your provider. Note and plugin changes need approval; plugin changes can run third-party code." });
+  composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Conversations stay in memory · Enter to send · Shift + Enter for a new line" });
+
+  this.unsubscribe = controller.subscribe(() => this.schedule());
+  this.hostUnsubscribe = this.host.subscribe(() => this.schedule());
+  this.connectionUnsubscribe = subscribeConnectionState(this.host, () => this.schedule());
+  let width = 0;
+  this.resizeObserver = new ResizeObserver(entries => {
+   for (const entry of entries) if (entry.target === composer && entry.contentRect.width !== width) {
+    width = entry.contentRect.width; this.resizeComposer();
+   }
+   this.schedule();
+  });
+  this.resizeObserver.observe(composer);
+  this.resizeObserver.observe(this.scrollEl);
+  this.render();
+ }
+
  async chooseSkill(): Promise<void> {
   try {
    const choices = await this.host.skillChoices();
+   if (this.closed) return;
    if (!choices.length) { new Notice(this.host.skillsStatus()); return; }
    new ChoiceModal(this.app, choices, s => `${s.diagnostic ? "Diagnostic: " : ""}${s.name} — ${s.description}`, s => { if (s.diagnostic) new Notice(`${s.name}: ${s.description}`); else this.host.controller?.selectSkill(s.name); }).open();
   } catch { new Notice("Could not read skills. Review skill-folder diagnostics in Settings."); }
  }
  private async chooseModel(): Promise<void> {
-  if (!this.host.controller?.idle || !this.host.runtime) return;
-  const provider = this.host.settings.providerId;
-  if (!provider) { new ConnectionSettingsModal(this.app, this.host).open(); return; }
+  if (!this.host.controller?.idle || !this.host.runtime || this.modelProbe || getConnectionBusy(this.host)) return;
+  const probe = new AbortController(); this.modelProbe = probe; this.schedule();
+  const registry = this.host.runtime.models;
   try {
-   const models = await this.host.runtime.models.getAvailable(provider);
-   if (!models.length) { new Notice("No available models. Connect or refresh models in Settings."); return; }
-   new ChoiceModal<Model<Api>>(this.app, [...models], m => `${m.name} (${m.id})`, m => {
-    if (!this.host.controller?.idle) return;
-    this.host.settings.modelId = m.id;
-    void this.host.saveSettings().then(() => this.host.connectionChanged()).catch(() => new Notice("Could not save model selection."));
-   }).open();
-  } catch { new Notice("Connection check failed. Reconnect in Settings."); }
+   const results = await Promise.all(registry.getProviders().map(async provider => {
+    try { return { models: await registry.getAvailable(provider.id, { signal: probe.signal }), error: "" }; }
+    catch { return { models: [], error: provider.name }; }
+   }));
+   if (this.closed || probe.signal.aborted || !this.host.controller?.idle || getConnectionBusy(this.host)) return;
+   const failed = results.filter(result => result.error).map(result => result.error);
+   if (failed.length) new Notice(`Could not check ${failed.join(", ")}. Other available providers are still listed; review authentication in Settings.`);
+   const models = results.flatMap(result => result.models).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+   if (!models.length) {
+    new Notice("No available models. Add provider authentication or refresh models in Settings.");
+    new ConnectionSettingsModal(this.app, this.host).open(); return;
+   }
+   const picker = new ChoiceModal<Model<Api>>(this.app, models, m => `${registry.getProvider(m.provider)?.name ?? m.provider} · ${m.name} (${m.id})`, m => {
+    if (this.closed || !this.host.controller?.idle || getConnectionBusy(this.host)) return;
+    const selection = new AbortController(); this.modelProbe = selection;
+    void runConnectionOperation(this.host, async () => {
+     const available = await registry.getAvailable(m.provider, { signal: selection.signal });
+     if (this.closed || selection.signal.aborted) return;
+     if (!available.some(model => model.id === m.id)) throw new Error("Model is no longer available. Reconnect or refresh models in Settings.");
+     const previousProvider = this.host.settings.providerId, previousModel = this.host.settings.modelId;
+     this.host.settings.providerId = m.provider; this.host.settings.modelId = m.id;
+     try { await this.host.saveSettings(); }
+     catch (error) { this.host.settings.providerId = previousProvider; this.host.settings.modelId = previousModel; throw error; }
+     await this.host.connectionChanged();
+    }).catch(() => { if (!this.closed && !selection.signal.aborted) new Notice("Could not select this model. Review authentication and storage in Settings."); })
+     .finally(() => { if (this.modelProbe === selection) this.modelProbe = undefined; this.schedule(); });
+   });
+   picker.setPlaceholder("Search available providers and models…");
+   this.selectionModal = picker; picker.open();
+  } catch { if (!this.closed && !probe.signal.aborted) new Notice("Could not load available models. Review authentication in Settings."); }
+  finally { if (this.modelProbe === probe) this.modelProbe = undefined; this.schedule(); }
+ }
+ private chooseThinking(): void {
+  const controller = this.host.controller;
+  if (!controller?.idle || !controller.ready || getConnectionBusy(this.host) || controller.thinkingLevels.length < 2) return;
+  const providerId = this.host.settings.providerId, modelId = this.host.settings.modelId;
+  const picker = new ChoiceModal<ModelThinkingLevel>(this.app, [...controller.thinkingLevels], level => `${THINKING_LABELS[level]}${level === controller.thinkingLevel ? " — selected" : ""}`, level => {
+   if (this.closed || !controller.idle || !controller.ready || providerId !== this.host.settings.providerId || modelId !== this.host.settings.modelId) return;
+   void runConnectionOperation(this.host, async () => {
+    const previous = this.host.settings.thinkingLevel, previousEffective = controller.thinkingLevel;
+    controller.setThinkingLevel(level); this.host.settings.thinkingLevel = level;
+    try { await this.host.saveSettings(); }
+    catch (error) {
+     this.host.settings.thinkingLevel = previous;
+     if (controller.idle && controller.ready) controller.setThinkingLevel(previousEffective);
+     throw error;
+    }
+   }).catch(() => { if (!this.closed) new Notice("Could not save thinking effort. The previous setting is retained."); });
+  });
+  picker.setPlaceholder("Thinking effort · higher levels may use more tokens and time");
+  this.selectionModal = picker; picker.open();
  }
  private attachNote(): void {
   const files = this.app.vault.getMarkdownFiles().filter(file => { try { validateVaultPath(file.path, this.app.vault.configDir); return true; } catch { return false; } });
   new ChoiceModal<TFile>(this.app, files, f => f.path, file => {
-   void this.app.vault.read(file).then(content => this.host.controller?.addAttachment(file.path, content)).catch(error => new Notice(error instanceof Error ? error.message : "Could not attach note."));
+   void this.app.vault.read(file).then(content => { if (!this.closed) this.host.controller?.addAttachment(file.path, content); }).catch(error => new Notice(error instanceof Error ? error.message : "Could not attach note."));
   }).open();
  }
  private async send(): Promise<void> {
   const controller = this.host.controller;
-  if (!controller || !this.textarea) return;
+  if (!controller || !this.textarea || !controller.idle || (!this.textarea.value.trim() && !controller.selectedSkills.size)) return;
   if (getConnectionBusy(this.host)) { new Notice("Wait for the connection operation to finish."); return; }
   const draft = this.textarea.value;
-  try { await controller.send(draft, () => { if (this.textarea?.value === draft) this.textarea.value = ""; }); }
-  catch (error) { new Notice(error instanceof Error && error.name !== "AbortError" ? error.message : "Stopped before submission."); }
+  try {
+   await controller.send(draft, () => {
+    if (this.textarea?.value === draft && !this.closed) { this.textarea.value = ""; this.resizeComposer(); }
+    this.followLatest = true;
+   });
+  } catch (error) { new Notice(error instanceof Error && error.name !== "AbortError" ? error.message : "Stopped before submission."); }
  }
- private schedule(): void { if (this.frame === undefined) this.frame = this.contentEl.win.requestAnimationFrame(() => { this.frame = undefined; this.render(); }); }
+ private resizeComposer(): void {
+  if (!this.textarea || this.closed) return;
+  this.textarea.style.height = "auto";
+  this.textarea.style.height = `${Math.min(this.textarea.scrollHeight, 220)}px`;
+ }
+ private scrollToLatest(): void {
+  if (!this.scrollEl || this.closed) return;
+  this.followLatest = true;
+  this.scrollEl.scrollTop = this.scrollEl.scrollHeight;
+  if (this.jump) this.jump.buttonEl.hidden = true;
+ }
+ private schedule(): void {
+  if (!this.closed && this.frame === undefined) this.frame = this.contentEl.win.requestAnimationFrame(() => { this.frame = undefined; this.render(); });
+ }
  private render(): void {
   const controller = this.host.controller;
-  if (!controller || !this.timelineEl) return;
-  const nearBottom = this.timelineEl.scrollHeight - this.timelineEl.scrollTop - this.timelineEl.clientHeight < 80;
-  this.statusEl!.setText(controller.setupMessage || `Agent: ${controller.state}`);
-  this.modelButton!.setButtonText(`${this.host.settings.providerId ?? "Provider"} / ${this.host.settings.modelId ?? "Choose model"}`).setDisabled(!controller.idle);
-  this.newButton!.setDisabled(!controller.idle); this.sendButton!.setDisabled(!controller.idle || !controller.ready || getConnectionBusy(this.host)); this.stopButton!.setDisabled(controller.idle);
-  this.chips!.empty();
-  for (const attachment of controller.attachments) new ButtonComponent(this.chips!).setButtonText(`${attachment.path} ×`).setTooltip("Remove attachment snapshot").onClick(() => controller.removeAttachment(attachment.id));
-  for (const name of controller.selectedSkills) new ButtonComponent(this.chips!).setButtonText(`Skill: ${name} ×`).setTooltip("Remove selected skill").onClick(() => controller.removeSkill(name));
+  if (!controller || !this.timelineEl || this.closed) return;
+  const empty = controller.timeline.length === 0;
+  if (empty) this.followLatest = true;
+  this.contentEl.setAttr("data-empty", String(empty));
+  this.emptyEl!.hidden = !empty;
+  this.timelineEl.hidden = empty;
+  const busy = getConnectionBusy(this.host);
+  this.statusEl!.setText(controller.idle ? busy ? "Connecting" : controller.ready ? "Ready" : "Not connected" : STATUS_LABELS[controller.state] ?? controller.state);
+  this.statusEl!.setAttr("data-state", controller.state);
+  this.setupEl!.hidden = !controller.setupMessage;
+  this.setupText!.setText(controller.setupMessage);
+  const { providerId, modelId } = this.host.settings;
+  const model = providerId && modelId ? this.host.runtime?.models.getModel(providerId, modelId) : undefined;
+  this.modelLabel!.setText(model?.name ?? "Choose model");
+  const providerName = providerId ? this.host.runtime?.models.getProvider(providerId)?.name ?? providerId : "";
+  this.modelButton!.setTooltip(providerId && modelId ? `${providerName} / ${modelId}` : "Choose a model from your connected providers").setDisabled(!controller.idle || busy || !!this.modelProbe);
+  this.modelButton!.buttonEl.setAttr("aria-label", `Choose model: ${providerName ? `${providerName} / ` : ""}${model?.name ?? "not selected"}`);
+  const thinking = THINKING_LABELS[controller.thinkingLevel];
+  this.thinkingLabel!.setText(thinking);
+  this.thinkingButton!.setDisabled(!controller.idle || !controller.ready || busy || controller.thinkingLevels.length < 2)
+   .setTooltip(controller.ready && controller.thinkingLevels.length < 2 ? `This model has fixed thinking effort: ${thinking}` : `Thinking effort: ${thinking}. Higher levels may use more tokens and time.`);
+  this.thinkingButton!.buttonEl.setAttr("aria-label", `Thinking effort: ${thinking}`);
+  this.newButton!.setDisabled(!controller.idle);
+  this.sendButton!.setDisabled(!controller.idle || !controller.ready || busy || (!this.textarea!.value.trim() && !controller.selectedSkills.size));
+  this.sendButton!.buttonEl.hidden = !controller.idle;
+  this.stopButton!.buttonEl.hidden = controller.idle;
+  this.stopButton!.setDisabled(controller.state === "stopping");
+
+  const chipKeys = new Set<string>();
+  for (const attachment of controller.attachments) {
+   const key = `note:${attachment.id}`; chipKeys.add(key);
+   if (!this.draftChips.has(key)) this.addDraftChip(key, attachment.path, "file-text", () => controller.removeAttachment(attachment.id));
+  }
+  for (const name of controller.selectedSkills) {
+   const key = `skill:${name}`; chipKeys.add(key);
+   if (!this.draftChips.has(key)) this.addDraftChip(key, name, "sparkles", () => controller.removeSkill(name));
+  }
+  for (const [key, button] of this.draftChips) if (!chipKeys.has(key)) { button.remove(); this.draftChips.delete(key); }
+  this.chips!.hidden = chipKeys.size === 0;
   const ids = new Set(controller.timeline.map(item => item.id));
   for (const [id, rendered] of this.rendered) if (!ids.has(id)) { if (rendered.component) this.removeChild(rendered.component); rendered.el.remove(); this.rendered.delete(id); }
   for (const item of controller.timeline) this.renderItem(item);
-  if (nearBottom) { this.timelineEl.scrollTop = this.timelineEl.scrollHeight; this.jump!.buttonEl.hide(); } else this.jump!.buttonEl.show();
+  this.scrollViewportWidth = this.scrollEl!.clientWidth;
+  this.scrollViewportHeight = this.scrollEl!.clientHeight;
+  if (this.followLatest) this.scrollToLatest();
  }
+
+ private addDraftChip(key: string, label: string, icon: string, remove: () => void): void {
+  const button = this.chips!.createEl("button", { cls: "obsidiai-chip", attr: { type: "button", "aria-label": `Remove ${label}`, title: label } });
+  setIcon(button.createSpan({ attr: { "aria-hidden": "true" } }), icon);
+  button.createSpan({ cls: "obsidiai-chip-label", text: label });
+  setIcon(button.createSpan({ cls: "obsidiai-chip-remove", attr: { "aria-hidden": "true" } }), "x");
+  button.addEventListener("click", remove);
+  this.draftChips.set(key, button);
+ }
+
  private renderItem(item: TimelineItem): void {
   let rendered = this.rendered.get(item.id);
   if (!rendered) {
-   const el = this.timelineEl!.createDiv({ cls: `obsidiai-message obsidiai-${item.kind}` });
-   const text = el.doc.createTextNode(""); el.appendChild(text);
-   rendered = { el, text, last: "", complete: false }; this.rendered.set(item.id, rendered);
+   const el = this.timelineEl!.createEl(item.kind === "tool" ? "details" : "div", { cls: `obsidiai-message obsidiai-${item.kind}` });
+   let status: HTMLElement | undefined;
+   let context: HTMLElement | undefined;
+   let notice: HTMLElement | undefined;
+   if (item.kind === "tool") {
+    const presentation = TOOL_PRESENTATION[item.toolName ?? ""];
+    const summary = el.createEl("summary", { cls: "obsidiai-tool-summary" });
+    setIcon(summary.createSpan({ cls: "obsidiai-tool-icon", attr: { "aria-hidden": "true" } }), presentation?.icon ?? "wrench");
+    const title = summary.createSpan({ cls: "obsidiai-tool-heading" });
+    title.createSpan({ cls: "obsidiai-tool-title", text: presentation?.label ?? item.toolName ?? "Tool" });
+    context = title.createSpan({ cls: "obsidiai-tool-context" });
+    status = summary.createSpan({ cls: "obsidiai-tool-status" });
+    setIcon(summary.createSpan({ cls: "obsidiai-tool-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
+    if (item.toolName === "propose_plugin_change") {
+     el.addClass("obsidiai-code-warning");
+     title.createSpan({ cls: "obsidiai-code-notice", text: "Can run third-party code" });
+    }
+    notice = title.createSpan({ cls: "obsidiai-tool-notice" }); notice.hidden = true;
+   } else if (item.kind === "assistant") {
+    const author = el.createDiv({ cls: "obsidiai-author" });
+    setIcon(author.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
+    author.createSpan({ text: "ObsidiAI" });
+   }
+   const body = el.createDiv({ cls: item.kind === "tool" ? "obsidiai-tool-body" : "obsidiai-message-body" });
+   const text = el.doc.createTextNode(""); body.appendChild(text);
+   rendered = { el, body, text, last: "", complete: false, status, context, notice };
+   this.rendered.set(item.id, rendered);
   }
   if (item.kind === "tool") {
-   rendered.el.setAttr("data-status", item.complete ? item.status ?? "success" : this.host.controller?.state === "awaiting-approval" ? "awaiting approval" : this.host.controller?.state === "stopping" ? "stopping" : "running");
-   if (item.toolName === "propose_plugin_change") rendered.el.addClass("obsidiai-code-warning");
+   const status = item.complete ? item.status ?? "success" : this.host.controller?.state === "awaiting-approval" ? "awaiting-approval" : this.host.controller?.state === "stopping" ? "stopping" : "running";
+   rendered.el.setAttr("data-status", status);
+   rendered.status!.setText(STATUS_LABELS[status] ?? status.replaceAll("_", " "));
+   if (!rendered.complete && rendered.last !== item.text) {
+    let data: unknown = item.details;
+    if (!data) { try { data = JSON.parse(item.text.slice(item.text.indexOf("\n") + 1)); } catch { /* Tool text need not be JSON. */ } }
+    if (data && typeof data === "object") {
+     const detail = data as Record<string, unknown>;
+     const context = [detail.action, detail.path ?? detail.pluginId ?? detail.name].filter(value => typeof value === "string");
+     rendered.context!.setText(context.join(" · "));
+     const notices = [detail.cacheStatus === "partial" ? "Provisional native-cache snapshot" : "", detail.truncated === true ? "Results truncated; more are available" : ""].filter(Boolean);
+     rendered.notice!.setText(notices.join(" · ")); rendered.notice!.hidden = notices.length === 0;
+    }
+   }
   }
   if (rendered.complete) return;
   if (item.text.startsWith(rendered.last)) rendered.text.appendData(item.text.slice(rendered.last.length)); else rendered.text.data = item.text;
   rendered.last = item.text;
+  rendered.el.setAttr("data-streaming", String(!item.complete));
   if (!item.complete) return;
   rendered.complete = true;
-  if (item.status && item.kind !== "tool") rendered.el.createDiv({ cls: "obsidiai-outcome", text: item.status });
   if (item.kind === "assistant") {
-   rendered.el.empty(); const component = new Component(); this.addChild(component); rendered.component = component;
-   void MarkdownRenderer.render(this.app, item.text, rendered.el, item.sourcePath, component).catch(() => rendered!.el.setText(item.text));
+   rendered.el.hidden = !item.text;
+   rendered.body.empty(); rendered.body.addClass("obsidiai-prose");
+   const component = new Component(); this.addChild(component); rendered.component = component;
+   const record = rendered;
+   void MarkdownRenderer.render(this.app, item.text, rendered.body, item.sourcePath, component).then(() => {
+    if (this.rendered.get(item.id) === record && this.followLatest) this.scrollToLatest();
+   }).catch(() => { if (!this.closed && this.rendered.get(item.id) === record) record.body.setText(item.text); });
   }
   if (item.kind === "tool") {
-   if (item.toolName === "propose_plugin_change") rendered.el.addClass("obsidiai-code-warning");
+   if (["error", "failed", "conflict"].includes(item.status ?? "")) (rendered.el as HTMLDetailsElement).open = true;
    const paths = new Set<string>();
    const inspect = (value: unknown, depth: number): void => {
     if (depth > 6 || paths.size >= 200) return;
@@ -142,15 +439,24 @@ export class AgentView extends ItemView {
     else if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) if (["path", "paths", "nodes", "source", "destination", "from", "to", "results", "items", "notes", "edges"].includes(key)) inspect(child, depth + 1);
    };
    inspect(item.details, 0);
-   for (const path of paths) { const link = rendered.el.createEl("a", { text: path, cls: "internal-link", href: path }); this.registerDomEvent(link, "click", event => { event.preventDefault(); void this.app.workspace.openLinkText(path, item.sourcePath); }); }
+   if (paths.size) {
+    const links = rendered.el.createDiv({ cls: "obsidiai-tool-links" });
+    for (const path of paths) {
+     const link = links.createEl("a", { text: path, cls: "internal-link", href: path });
+     link.addEventListener("click", event => { event.preventDefault(); void this.app.workspace.openLinkText(path, item.sourcePath); });
+    }
+   }
   }
  }
  private release(): void {
+  this.closed = true;
+  this.modelProbe?.abort(); this.selectionModal?.close();
   this.unsubscribe?.(); this.hostUnsubscribe?.(); this.connectionUnsubscribe?.();
+  this.resizeObserver?.disconnect();
   if (this.frame !== undefined) this.contentEl.win.cancelAnimationFrame(this.frame);
   this.frame = undefined;
   for (const item of this.rendered.values()) if (item.component) this.removeChild(item.component);
-  this.rendered.clear();
+  this.rendered.clear(); this.draftChips.clear();
  }
  async onClose(): Promise<void> { this.release(); this.host.viewClosed(this.leaf); }
  onunload(): void { this.release(); }

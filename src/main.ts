@@ -67,12 +67,12 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
   } });
  }
  saveSettings(): Promise<void> {
-  const snapshot = { providerId: this.settings.providerId, modelId: this.settings.modelId, credentialSecretId: this.settings.credentialSecretId, skillsFolder: this.settings.skillsFolder };
+  const snapshot = { providerId: this.settings.providerId, modelId: this.settings.modelId, thinkingLevel: this.settings.thinkingLevel, credentialSecretId: this.settings.credentialSecretId, skillsFolder: this.settings.skillsFolder };
   const next = this.saveQueue.then(() => this.saveData(snapshot)); this.saveQueue = next.catch(() => undefined); return next;
  }
  isRunning(): boolean { return this.controller !== null && !this.controller.idle; }
  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
- async connectionChanged(): Promise<void> { await this.controller?.configure(this.settings.providerId, this.settings.modelId); for (const listener of this.listeners) listener(); }
+ async connectionChanged(): Promise<void> { await this.controller?.configure(this.settings.providerId, this.settings.modelId, this.settings.thinkingLevel); for (const listener of this.listeners) listener(); }
  skillsStatus(): string { return this.catalog ? this.catalog.diagnostics.map(d => typeof d === "string" ? d : JSON.stringify(d)).join("\n") || `${this.catalog.entries.length} skills found in ${this.settings.skillsFolder}.` : "Skills are unavailable until the desktop runtime starts."; }
  async refreshSkills(): Promise<void> { await this.catalog?.refresh(true); for (const listener of this.listeners) listener(); }
  async skillChoices(): Promise<{ name: string; description: string; diagnostic?: boolean }[]> {

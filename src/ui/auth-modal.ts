@@ -61,7 +61,8 @@ export class AuthModal extends Modal implements AuthInteraction {
   this.contentEl.querySelectorAll("input").forEach(input => { input.value = ""; });
   this.contentEl.empty();
  }
- prompt(prompt: AuthPrompt): Promise<string> {
+ // Pi normalizes AuthInteraction by spreading it; callbacks must be own, bound properties.
+ prompt = (prompt: AuthPrompt): Promise<string> => {
   if (this.signal.aborted || this.finished) return Promise.reject(new DOMException("Login cancelled", "AbortError"));
   const row = this.prompts.createDiv({ cls: "obsidiai-auth-prompt" });
   const label = row.createEl("label", { text: prompt.message });
@@ -93,7 +94,7 @@ export class AuthModal extends Modal implements AuthInteraction {
   new ButtonComponent(row).setButtonText("Continue").setCta().onClick(submit);
   input?.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); submit(); } });
   return pending.promise.finally(() => { this.pending.delete(pending); });
- }
+ };
  private link(container: HTMLElement, url: string, label = "Open browser"): void {
   let parsed: URL;
   try { parsed = new URL(url); } catch { container.createEl("p", { text: "Provider supplied an invalid browser URL." }); return; }
@@ -104,7 +105,7 @@ export class AuthModal extends Modal implements AuthInteraction {
    void shell.openExternal(parsed.href).catch(() => container.createEl("p", { text: "Could not open the browser. Open the displayed address manually." }));
   });
  }
- notify(event: AuthEvent): void {
+ notify = (event: AuthEvent): void => {
   if (this.signal.aborted || this.finished) return;
   if (event.type === "progress") {
    let progress = this.events.querySelector<HTMLElement>(".obsidiai-auth-progress");
@@ -124,5 +125,5 @@ export class AuthModal extends Modal implements AuthInteraction {
    row.createEl("code", { text: event.userCode });
    this.link(row, event.verificationUri);
   }
- }
+ };
 }

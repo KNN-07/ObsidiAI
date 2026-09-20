@@ -1,5 +1,5 @@
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Model, Api } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels, type Model, type Api, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ProviderRuntime } from "./runtime";
 
 export type RunState = "idle" | "running" | "awaiting-approval" | "stopping";
@@ -31,6 +31,8 @@ export class AgentController {
  private sourcePath = "";
  private streaming?: TimelineItem;
  private selected?: Model<Api>;
+ private effectiveThinkingLevel: ModelThinkingLevel = "off";
+ private supportedThinkingLevels: readonly ModelThinkingLevel[] = [];
  constructor(readonly runtime: ProviderRuntime, readonly services: ControllerServices) {
   this.unsubscribeApproval = services.approvals.subscribe(pending => {
    if (this.state !== "idle" && this.state !== "stopping") this.state = pending ? "awaiting-approval" : "running";
@@ -40,23 +42,45 @@ export class AgentController {
  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
  private emit(): void { for (const listener of this.listeners) listener(); }
  get idle(): boolean { return this.state === "idle" && !this.disposed; }
- async configure(providerId: string | null, modelId: string | null): Promise<void> {
+ get thinkingLevel(): ModelThinkingLevel { return this.effectiveThinkingLevel; }
+ get thinkingLevels(): readonly ModelThinkingLevel[] { return this.supportedThinkingLevels; }
+ setThinkingLevel(level: ModelThinkingLevel): void {
+  if (!this.idle) throw new Error("Wait for the current run to settle.");
+  if (!this.ready || !this.selected) throw new Error("Select an available model before changing thinking effort.");
+  if (!this.supportedThinkingLevels.includes(level)) throw new Error("This model does not support that thinking effort.");
+  this.effectiveThinkingLevel = level;
+  if (this.agent) this.agent.state.thinkingLevel = level;
+  this.emit();
+ }
+ async configure(providerId: string | null, modelId: string | null, thinkingLevel: ModelThinkingLevel = "off"): Promise<void> {
   if (!this.idle) return;
   this.preparation?.abort();
+  this.preparation = undefined;
   this.ready = false;
   this.selected = undefined;
+  this.effectiveThinkingLevel = "off";
+  this.supportedThinkingLevels = [];
   const provider = providerId && this.runtime.models.getProvider(providerId);
   const model = providerId && modelId && this.runtime.models.getModel(providerId, modelId);
   if (!provider || !model) { this.setupMessage = providerId || modelId ? "Stored selection is unavailable. Choose a provider and model in Settings." : "Choose a provider, connect an account, and select an available model in Settings."; this.emit(); return; }
   const check = new AbortController();
   this.preparation = check;
+  this.setupMessage = "Checking model availability.";
+  this.emit();
   try {
    const available = await this.runtime.models.getAvailable(provider.id, { signal: check.signal });
-   if (check.signal.aborted || !this.idle) return;
-   if (!available.some(m => m.id === model.id)) { this.setupMessage = "This model is unavailable for the current connection. Connect or select another model in Settings."; }
-   else { this.selected = model; if (this.agent) this.agent.state.model = model; this.ready = true; this.setupMessage = ""; }
-  } catch { if (!check.signal.aborted) this.setupMessage = "Connection check failed. Reconnect in Settings."; }
-  finally { if (this.preparation === check) this.preparation = undefined; this.emit(); }
+   if (check.signal.aborted || this.preparation !== check || !this.idle) return;
+   const selected = available.find(m => m.id === model.id && m.provider === provider.id);
+   if (!selected) { this.setupMessage = "This model is unavailable for the current connection. Connect or select another model in Settings."; }
+   else {
+    this.selected = selected;
+    this.supportedThinkingLevels = getSupportedThinkingLevels(selected);
+    this.effectiveThinkingLevel = clampThinkingLevel(selected, thinkingLevel);
+    if (this.agent) { this.agent.state.model = selected; this.agent.state.thinkingLevel = this.effectiveThinkingLevel; }
+    this.ready = true; this.setupMessage = "";
+   }
+  } catch { if (!check.signal.aborted && this.preparation === check && this.idle) this.setupMessage = "Connection check failed. Reconnect in Settings."; }
+  finally { if (this.preparation === check) { this.preparation = undefined; this.emit(); } }
  }
  addAttachment(path: string, content: string): void {
   if (this.disposed) throw new Error("The agent has been unloaded.");
@@ -93,7 +117,7 @@ export class AgentController {
   const input = [slash ? `Use the explicitly selected skill ${slash[1]}. ${slash[2] ?? ""}` : text, context, skillContext].filter(Boolean).join("\n\n");
   const systemPrompt = `${SYSTEM}\n\n${this.services.skills.catalogPrompt()}`;
   if (!this.agent) {
-   this.agent = new Agent({ initialState: { model: this.selected!, systemPrompt, thinkingLevel: "off", tools: [...this.services.notes.tools, ...this.services.metadata.tools, ...this.services.skills.tools, ...this.services.plugins.tools] }, streamFn: this.runtime.streamFn, sessionId: crypto.randomUUID(), toolExecution: "sequential" });
+   this.agent = new Agent({ initialState: { model: this.selected!, systemPrompt, thinkingLevel: this.effectiveThinkingLevel, tools: [...this.services.notes.tools, ...this.services.metadata.tools, ...this.services.skills.tools, ...this.services.plugins.tools] }, streamFn: this.runtime.streamFn, sessionId: crypto.randomUUID(), toolExecution: "sequential" });
    this.unsubscribeAgent = this.agent.subscribe(event => this.onEvent(event));
   } else this.agent.state.systemPrompt = systemPrompt;
   signal.throwIfAborted();
