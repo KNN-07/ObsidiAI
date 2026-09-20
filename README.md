@@ -19,7 +19,7 @@ Powered by [pi](https://github.com/earendil-works/pi), ObsidiAI runs inside the 
 
 ![Native ObsidiAI chat in Obsidian's light theme, with model and thinking-effort controls in the composer](assets/chat-light.png)
 
-*Actual Obsidian 1.13.7, in a disposable vault with local scripted providers and sample conversation content. No private notes or credentials are shown. Screenshots depict the source build, not the older 0.1.0 release.*
+*Actual Obsidian 1.13.7, in a disposable vault with local scripted providers and sample conversation content. No private notes or credentials are shown. Screenshots show the interface included in 0.1.1.*
 
 ## From question to approved change
 
@@ -60,7 +60,7 @@ The source build uses a Claude-inspired arrangement with restrained, shadcn-styl
 - **Read without clutter.** User messages align right; assistant responses use a readable column capped at 760px. Expand a tool card for its result and note links. Errors expand automatically; code-execution warnings and partial-result notices remain visible when collapsed.
 - **Use any pane width.** The layout adapts to narrow split panes and Obsidian's light/dark themes. Enter sends; Shift+Enter adds a line. Scrolling upward pauses automatic following; **Jump to latest** resumes it.
 
-The redesigned interface, multi-provider login list, and thinking-effort selector are in the source build; the published 0.1.0 ZIP is unchanged.
+The redesigned interface, multi-provider login list, and thinking-effort selector are included in **0.1.1**. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
 
 ## Get started
 
