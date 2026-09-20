@@ -135,6 +135,14 @@
 .obsidiai-chip-remove { color: var(--text-faint); }
 .obsidiai-agent button.obsidiai-chip:hover { background: var(--background-modifier-hover); }
 .obsidiai-agent button.obsidiai-auto-context { border-style: dashed; }
+.obsidiai-draft-attachment { display: inline-flex; max-width: 100%; min-width: 0; }
+.obsidiai-agent .obsidiai-draft-attachment > .obsidiai-chip:first-child { min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.obsidiai-agent button.obsidiai-attachment-remove { flex-shrink: 0; padding-inline: 6px; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.obsidiai-drop-hint { position: absolute; z-index: 20; inset: 12px; display: grid; place-items: center; padding: 24px; border: 2px dashed var(--interactive-accent); border-radius: 18px; background: var(--background-primary); color: var(--text-accent); text-align: center; font-size: 16px; pointer-events: none; }
+.obsidiai-attachment-preview { overflow: auto; }
+.obsidiai-attachment-preview > p { color: var(--text-muted); font-size: 12px; }
+.obsidiai-attachment-preview-text { max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); font: 12px/1.6 var(--font-monospace); user-select: text; }
+.obsidiai-attachment-preview-image { display: block; max-width: 100%; max-height: 65vh; margin: 0 auto; object-fit: contain; }
 .obsidiai-disclosure { max-width: 650px; margin: 10px auto 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; text-align: center; }
 .obsidiai-composer-hint { margin-top: 5px; color: var(--text-faint); font-size: 10px; line-height: 1.5; text-align: center; }
 .obsidiai-setup { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--background-modifier-border); border-radius: 9px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
@@ -147,6 +155,8 @@
 .obsidiai-user { width: fit-content; max-width: 86%; margin-left: auto; padding: 12px 18px; border: 1px solid var(--background-modifier-border); border-radius: 16px 16px 4px 16px; background: var(--background-secondary); }
 .obsidiai-sent-context { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .obsidiai-sent-attachment { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border: 1px solid var(--background-modifier-border); border-radius: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.4; text-decoration: none; }
+.obsidiai-agent button.obsidiai-sent-attachment { height: auto; background: transparent; box-shadow: none; text-align: left; }
+.obsidiai-agent button.obsidiai-sent-attachment:hover { background: var(--background-modifier-hover); }
 .obsidiai-sent-attachment > span:first-child { display: flex; flex-shrink: 0; }
 .obsidiai-sent-attachment > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obsidiai-sent-attachment svg { width: 13px; height: 13px; }

@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { DataAdapter } from "obsidian";
 import type { TimelineItem } from "./controller";
+import { resolveAttachments } from "./attachments";
 
 export interface Conversation {
  id: string; title: string; createdAt: number; updatedAt: number;
@@ -39,6 +40,12 @@ export class HistoryStore implements ConversationHistory {
    if (c.messages.some((m: Record<string, unknown>) => !m || !["user", "assistant", "toolResult"].includes(String(m.role)) || !(typeof m.content === "string" || Array.isArray(m.content)))) throw new Error("Invalid messages");
    if (c.timeline.some((t: Record<string, unknown>) => !t || typeof t.id !== "string" || !["user", "assistant", "tool", "error"].includes(String(t.kind)) || typeof t.text !== "string" || typeof t.sourcePath !== "string" || typeof t.complete !== "boolean")) throw new Error("Invalid timeline");
    if (c.timeline.some((t: Record<string, unknown>) => [t.attachmentPaths, t.skillNames].some(value => value !== undefined && (!Array.isArray(value) || value.some(item => typeof item !== "string"))))) throw new Error("Invalid displayed context");
+   for (const item of c.timeline) {
+    if (item.attachmentReferences !== undefined) {
+     if (item.kind !== "user") throw new Error("Invalid attachment timeline item");
+     resolveAttachments(item.attachmentReferences, c.messages);
+    }
+   }
    ids.add(c.id);
   }
   return this.records = data.conversations;
@@ -50,7 +57,15 @@ export class HistoryStore implements ConversationHistory {
  save(conversation: Conversation): Promise<void> {
   // Snapshot before joining the queue: later caller mutations cannot change this write.
   const copy = structuredClone(conversation);
-  return this.operation(async () => { const next = (await this.load()).filter(c => c.id !== copy.id); next.push(copy); await this.persist(next); });
+  return this.operation(async () => {
+   for (const item of copy.timeline) {
+    if (item.attachmentReferences !== undefined) {
+     if (item.kind !== "user") throw new Error("Invalid attachment timeline item");
+     resolveAttachments(item.attachmentReferences, copy.messages);
+    }
+   }
+   const next = (await this.load()).filter(c => c.id !== copy.id); next.push(copy); await this.persist(next);
+  });
  }
  delete(ids: readonly string[]): Promise<void> {
   const selected = new Set(ids);

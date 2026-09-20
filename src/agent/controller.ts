@@ -4,10 +4,11 @@ import type { ProviderRuntime } from "./runtime";
 import type { ApprovalDecision, PendingApproval, PermissionMode } from "../ui/approval";
 import type { Conversation, ConversationHistory, ConversationSummary } from "./history";
 import { safeProviderError } from "./provider-errors";
+import { normalizeAttachment, resolveAttachments, validateAttachments, type Attachment, type AttachmentInput, type AttachmentReference } from "./attachments";
+import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
 
 export type RunState = "idle" | "running" | "awaiting-approval" | "stopping";
-export interface Attachment { id: string; path: string; content: string; }
-export interface TimelineItem { id: string; kind: "user" | "assistant" | "tool" | "error"; text: string; complete: boolean; sourcePath: string; attachmentPaths?: string[]; skillNames?: string[]; toolName?: string; status?: string; details?: unknown; }
+export interface TimelineItem { id: string; kind: "user" | "assistant" | "tool" | "error"; text: string; complete: boolean; sourcePath: string; attachmentPaths?: string[]; attachmentReferences?: AttachmentReference[]; skillNames?: string[]; toolName?: string; status?: string; details?: unknown; }
 export interface ControllerServices {
  notes: { tools: AgentTool<any>[]; beginRun(): void; endRun(): void };
  metadata: { tools: AgentTool<any>[] };
@@ -38,7 +39,7 @@ export class AgentController {
  private disposed = false;
  private sourcePath = "";
  private streaming?: TimelineItem;
- private submittedMessage?: Pick<TimelineItem, "text" | "attachmentPaths" | "skillNames">;
+ private submittedMessage?: Pick<TimelineItem, "text" | "attachmentPaths" | "attachmentReferences" | "skillNames">;
  private selected?: Model<Api>;
  private effectiveThinkingLevel: ModelThinkingLevel = "off";
  private supportedThinkingLevels: readonly ModelThinkingLevel[] = [];
@@ -106,17 +107,23 @@ export class AgentController {
   } catch { if (!check.signal.aborted && this.preparation === check && this.idle) this.setupMessage = "Connection check failed. Reconnect in Settings."; }
   finally { if (this.preparation === check) { this.preparation = undefined; this.emit(); } }
  }
- addAttachment(path: string, content: string): void {
+ addAttachment(input: AttachmentInput): void {
   if (this.disposed) throw new Error("The agent has been unloaded.");
-  if (content.length > 200_000) throw new Error("Attachment exceeds 200,000 characters; it was not attached.");
-  this.attachments.push({ id: crypto.randomUUID(), path, content }); this.emit();
+  const attachment = { ...normalizeAttachment(input), id: crypto.randomUUID() };
+  validateAttachments([...this.attachments, attachment]);
+  this.attachments.push(attachment); this.emit();
+ }
+ getSentAttachments(item: TimelineItem): Attachment[] {
+  if (item.kind !== "user" || !this.timeline.includes(item) || !item.attachmentReferences) return [];
+  try { return resolveAttachments(item.attachmentReferences, this.agent?.state.messages ?? []); }
+  catch { return []; }
  }
  removeAttachment(id: string): void { const index = this.attachments.findIndex(a => a.id === id); if (index >= 0) this.attachments.splice(index, 1); this.emit(); }
  selectSkill(name: string): void { this.selectedSkills.add(name); this.emit(); }
  removeSkill(name: string): void { this.selectedSkills.delete(name); this.emit(); }
  send(text: string, onSubmitted?: () => void): Promise<void> {
   if (!this.idle || !this.ready || !this.selected) return Promise.reject(new Error(this.setupMessage || "Wait for the current run to settle."));
-  if (!text.trim() && !this.selectedSkills.size) return Promise.reject(new Error("Enter a message or choose a skill."));
+  if (!text.trim() && !this.selectedSkills.size && !this.attachments.length) return Promise.reject(new Error("Enter a message, attach a file, or choose a skill."));
   this.state = "running"; this.emit();
   const cancellation = new AbortController(); this.preparation = cancellation;
   const operation = this.run(text, cancellation.signal, onSubmitted).finally(async () => {
@@ -130,6 +137,9 @@ export class AgentController {
  private async run(text: string, signal: AbortSignal, onSubmitted?: () => void): Promise<void> {
   const names = new Set(this.selectedSkills);
   const attachments = [...this.attachments];
+  validateAttachments(attachments);
+  const historicalImages = this.agent?.state.messages.some(message => (message.role === "user" || message.role === "toolResult") && Array.isArray(message.content) && message.content.some(block => block.type === "image"));
+  if (!this.selected?.input.includes("image") && (attachments.some(attachment => attachment.kind === "image") || historicalImages)) throw new Error("This conversation contains images. Choose a model that supports image input, or start a new conversation without images.");
   const slash = /^\/skill:([^\s]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
   if (slash) names.add(slash[1]!);
   await this.services.skills.beginRun([...names]);
@@ -137,18 +147,27 @@ export class AgentController {
   const skillContext = await this.services.skills.selectedContext([...names], slash?.[2]);
   signal.throwIfAborted();
   this.services.notes.beginRun();
-  this.sourcePath = attachments[0]?.path ?? "";
-  const context = attachments.map(a => `Untrusted attachment snapshot (not a read_note edit snapshot):\n${JSON.stringify({ path: a.path, content: a.content })}`).join("\n\n");
-  const input = [slash ? `Use the explicitly selected skill ${slash[1]}. ${slash[2] ?? ""}` : text, context, skillContext].filter(Boolean).join("\n\n");
+  this.sourcePath = attachments.find(attachment => attachment.kind === "note")?.path ?? "";
+  const input: (TextContent | ImageContent)[] = [];
+  const promptText = slash ? `Use the explicitly selected skill ${slash[1]}. ${slash[2] ?? ""}` : text;
+  if (promptText) input.push({ type: "text", text: promptText });
+  const attachmentReferences: AttachmentReference[] = [];
+  const messageIndex = this.agent?.state.messages.length ?? 0;
+  for (const attachment of attachments) {
+   input.push({ type: "text", text: `Untrusted ${attachment.kind} attachment snapshot (not a read_note edit snapshot): ${JSON.stringify(attachment.path)}` });
+   attachmentReferences.push({ id: attachment.id, kind: attachment.kind, path: attachment.path, messageIndex, blockIndex: input.length });
+   input.push(attachment.kind === "image" ? { type: "image", data: attachment.data, mimeType: attachment.mimeType } : { type: "text", text: attachment.content });
+  }
+  if (skillContext) input.push({ type: "text", text: skillContext });
   const systemPrompt = this.systemPrompt();
   if (!this.agent) this.createAgent();
   this.agent!.state.systemPrompt = systemPrompt;
   signal.throwIfAborted();
   for (const attachment of attachments) { const index = this.attachments.indexOf(attachment); if (index >= 0) this.attachments.splice(index, 1); }
   for (const name of names) this.selectedSkills.delete(name);
-  this.submittedMessage = { text, attachmentPaths: attachments.map(a => a.path), skillNames: [...names] };
+  this.submittedMessage = { text, attachmentPaths: attachments.map(a => a.path), attachmentReferences, skillNames: [...names] };
   onSubmitted?.();
-  try { await this.agent!.prompt(input); await this.agent!.waitForIdle(); }
+  try { await this.agent!.prompt({ role: "user", content: input, timestamp: Date.now() }); await this.agent!.waitForIdle(); }
   catch (error) { this.timeline.push({ id: crypto.randomUUID(), kind: "error", text: this.state === "stopping" ? "Stopped. Already applied changes are not undone." : safeProviderError(error), complete: true, sourcePath: this.sourcePath }); }
   finally { this.submittedMessage = undefined; }
  }
@@ -206,6 +225,7 @@ export class AgentController {
  private clearConversation(): void {
   this.unsubscribeAgent?.(); this.unsubscribeAgent = undefined;
   this.agent?.reset(); this.agent = undefined; this.streaming = undefined;
+  this.sourcePath = ""; this.submittedMessage = undefined;
   this.conversationId = crypto.randomUUID(); this.createdAt = Date.now();
   this.services.approvals.setMode("ask");
   this.timeline.length = 0; this.attachments.length = 0; this.selectedSkills.clear();
@@ -264,6 +284,7 @@ export class AgentController {
   finally {
    this.unsubscribeAgent?.(); this.unsubscribeApproval();
    this.agent?.reset(); this.agent = undefined; this.selected = undefined; this.ready = false;
+   this.sourcePath = ""; this.submittedMessage = undefined; this.streaming = undefined;
    this.listeners.clear(); this.timeline.length = 0; this.attachments.length = 0; this.selectedSkills.clear();
   }
  }

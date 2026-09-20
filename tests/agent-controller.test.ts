@@ -199,7 +199,7 @@ describe("real Agent conversation settlement", () => {
   await f.controller.dispose();
  });
  it("keeps attachments on failed setup or unknown slash skills and clears only upon submission", async () => {
-  const f = fixture(); f.controller.addAttachment("A.md", "Private note");
+  const f = fixture(); f.controller.addAttachment({ kind: "note", path: "A.md", content: "Private note" });
   await expect(f.controller.send("Hello")).rejects.toThrow(); expect(f.controller.attachments).toHaveLength(1);
   await f.configure(); await expect(f.controller.send("/skill:unknown")).rejects.toThrow("Unknown skill");
   expect(f.controller.attachments).toHaveLength(1); expect(f.controller.idle).toBe(true);
@@ -213,7 +213,7 @@ describe("real Agent conversation settlement", () => {
   const adapter = { async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path: string, value: string) { bytes = value; } };
   const history = new HistoryStore(adapter, "history.json");
   const f = fixture({}, history); await f.configure();
-  f.controller.addAttachment("Projects/Alpha.md", "PRIVATE NOTE BODY");
+  f.controller.addAttachment({ kind: "note", path: "Projects/Alpha.md", content: "PRIVATE NOTE BODY" });
   f.controller.services.skills.selectedContext = async () => "PRIVATE SKILL BODY";
   f.controller.selectSkill("review");
   f.faux.setResponses([(context: Context) => {
@@ -227,9 +227,11 @@ describe("real Agent conversation settlement", () => {
   });
   expect(JSON.stringify(f.controller.timeline)).not.toMatch(/PRIVATE NOTE BODY|PRIVATE SKILL BODY/);
   const [saved] = await history.list(); await f.controller.dispose();
-  const next = fixture({}, new HistoryStore(adapter, "history.json")); await next.configure();
+  const next = fixture({}, new HistoryStore(adapter, "history.json"));
   await next.controller.openConversation(saved!.id);
   expect(next.controller.timeline.find(t => t.kind === "user")).toMatchObject({ text: "Review the attached note.", attachmentPaths: ["Projects/Alpha.md"] });
+  expect(next.controller.getSentAttachments(next.controller.timeline.find(t => t.kind === "user")!)).toMatchObject([{ kind: "note", path: "Projects/Alpha.md", content: "PRIVATE NOTE BODY" }]);
+  await next.configure();
   next.faux.setResponses([(context: Context) => {
    expect(JSON.stringify(context.messages)).toContain("PRIVATE NOTE BODY");
    return fauxAssistantMessage("Remembered.");
@@ -237,6 +239,67 @@ describe("real Agent conversation settlement", () => {
   await next.controller.send("Continue.");
   expect(next.controller.timeline.filter(t => t.kind === "user").at(-1)).toMatchObject({ text: "Continue." });
   await next.controller.dispose();
+ });
+ it("sends attachment-only images as real image content and restores previews before model setup", async () => {
+  let bytes = "";
+  const adapter = { async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path: string, value: string) { bytes = value; } };
+  const f = fixture({ models: [{ id: "vision", input: ["text", "image"] }] }, new HistoryStore(adapter, "history.json"));
+  await f.configure();
+  const data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=";
+  f.controller.addAttachment({ kind: "image", path: "/private/screenshots/picture.png", data, mimeType: "image/png" });
+  f.controller.addAttachment({ kind: "text", path: "C:\\private\\sample.txt", content: "Text snapshot" });
+  f.faux.setResponses([(context: Context) => {
+   const message = context.messages.find(message => message.role === "user")!;
+   expect(message.content).toContainEqual({ type: "image", data, mimeType: "image/png" });
+   expect(JSON.stringify(message)).not.toContain("/private/");
+   expect(JSON.stringify(message)).not.toContain("C:");
+   return fauxAssistantMessage("Saw the image.");
+  }]);
+  await f.controller.send("");
+  const item = f.controller.timeline.find(item => item.kind === "user")!;
+  expect(item.sourcePath).toBe("");
+  expect(item.text).toBe("");
+  expect(JSON.stringify(f.controller.timeline)).not.toContain(data);
+  const originals = f.controller.getSentAttachments(item);
+  expect(originals).toMatchObject([{ kind: "image", path: "picture.png", data }, { kind: "text", path: "sample.txt", content: "Text snapshot" }]);
+  const [saved] = await f.controller.listHistory(); await f.controller.dispose();
+  const next = fixture({ models: [{ id: "plain", input: ["text"] }] }, new HistoryStore(adapter, "history.json"));
+  await next.controller.openConversation(saved!.id);
+  const restored = next.controller.timeline.find(item => item.kind === "user")!;
+  expect(next.controller.getSentAttachments(restored)).toEqual(originals);
+  await next.configure();
+  next.controller.addAttachment({ kind: "text", path: "keep.txt", content: "Keep draft" });
+  await expect(next.controller.send("Continue")).rejects.toThrow("supports image");
+  expect(next.controller.attachments).toMatchObject([{ content: "Keep draft" }]);
+  await next.controller.reset();
+  expect(next.controller.getSentAttachments(restored)).toEqual([]);
+  await next.controller.dispose();
+ });
+ it("retains image drafts when the selected model cannot receive them", async () => {
+  const f = fixture({ models: [{ id: "plain", input: ["text"] }] }); await f.configure();
+  f.controller.addAttachment({ kind: "image", path: "image.png", mimeType: "image/png", data: "aGVsbG8=" });
+  await expect(f.controller.send("")).rejects.toThrow("supports image");
+  expect(f.controller.attachments).toHaveLength(1);
+  expect(f.controller.timeline).toEqual([]);
+  await f.controller.dispose();
+ });
+ it("rejects oversized and excessive attachments without losing accepted drafts", async () => {
+  const f = fixture();
+  expect(() => f.controller.addAttachment({ kind: "text", path: "large.txt", content: "x".repeat(200_001) })).toThrow("200,000");
+  expect(() => f.controller.addAttachment({ kind: "image", path: "large.png", mimeType: "image/png", data: "A".repeat(6_990_508) })).toThrow();
+  expect(() => f.controller.addAttachment({ kind: "note", path: "/private/note.md", content: "note" })).toThrow("path");
+  for (let i = 0; i < 20; i++) f.controller.addAttachment({ kind: "text", path: `${i}.txt`, content: "keep" });
+  expect(() => f.controller.addAttachment({ kind: "text", path: "extra.txt", content: "extra" })).toThrow("20 files");
+  expect(f.controller.attachments).toHaveLength(20);
+  await f.controller.dispose();
+ });
+ it("enforces the combined byte limit without consuming existing image drafts", async () => {
+  const f = fixture();
+  const data = Buffer.alloc(5 * 1024 * 1024).toString("base64");
+  for (let i = 0; i < 4; i++) f.controller.addAttachment({ kind: "image", path: `${i}.png`, mimeType: "image/png", data });
+  expect(() => f.controller.addAttachment({ kind: "text", path: "extra.txt", content: "x" })).toThrow("20 MiB");
+  expect(f.controller.attachments).toHaveLength(4);
+  await f.controller.dispose();
  });
  it("surfaces assistant error stopReason without exposing upstream error bodies", async () => {
   const f = fixture(); await f.configure(); f.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "secret-token-upstream" })]);

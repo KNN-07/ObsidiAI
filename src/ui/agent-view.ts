@@ -9,6 +9,9 @@ import type { PermissionMode } from "./approval";
 import { renderApprovalCard } from "./approval-card";
 import { ComposerSuggest, type ComposerChoice, type ComposerTrigger } from "./composer-suggest";
 import { ChatHistoryView } from "./history-view";
+import type { Attachment } from "../agent/attachments";
+import { FILE_ACCEPT, isLargePaste, readAttachmentFile } from "./attachment-input";
+import { AttachmentPreviewModal } from "./attachment-preview";
 
 export const AGENT_VIEW_TYPE = "obsidiai-agent";
 export interface AgentViewHost extends SettingsHost {
@@ -121,8 +124,14 @@ export class AgentView extends ItemView {
  private attachmentEpoch = 0;
  private attachmentPending = false;
  private attachmentStatus?: HTMLElement;
+ private fileInput?: HTMLInputElement;
+ private fileButton?: ButtonComponent;
+ private filePickerEpoch?: number;
+ private pastedTextCount = 0;
+ private dropHint?: HTMLElement;
+ private dragDepth = 0;
  private readonly rendered = new Map<string, RenderedMessage>();
- private readonly draftChips = new Map<string, HTMLButtonElement>();
+ private readonly draftChips = new Map<string, HTMLElement>();
  private readonly toolChains = new Map<string, RenderedToolChain>();
  private approvalEl?: HTMLElement;
  private approvalId?: string;
@@ -206,6 +215,7 @@ export class AgentView extends ItemView {
    });
   }
   this.timelineEl = this.scrollEl.createDiv({ cls: "obsidiai-timeline", attr: { "aria-label": "Conversation" } });
+  this.registerDomEvent(this.timelineEl, "click", event => this.openModifiedNoteLink(event), { capture: true });
   this.registerDomEvent(this.scrollEl, "scroll", () => {
    // Pane/composer resizing is not a request to stop following the response.
    if (this.scrollEl!.clientWidth !== this.scrollViewportWidth || this.scrollEl!.clientHeight !== this.scrollViewportHeight) { this.schedule(); return; }
@@ -225,6 +235,7 @@ export class AgentView extends ItemView {
   this.chips = composer.createDiv({ cls: "obsidiai-chips", attr: { "aria-label": "Draft context" } });
   this.textarea = composer.createEl("textarea", { cls: "obsidiai-composer", attr: { placeholder: "Ask anything about your vault…", "aria-label": "Message", rows: "2" } });
   this.registerDomEvent(this.textarea, "input", () => { this.resizeComposer(); this.schedule(); });
+  this.registerDomEvent(this.textarea, "paste", event => this.pasteAttachments(event));
   this.composerSuggest = new ComposerSuggest(this.textarea, composer, trigger => this.contextChoices(trigger),
    choice => { if (choice.kind !== "skill") void this.attachTarget(choice); },
    () => { void this.send(); }, () => !this.closed && controller.idle && !this.attachmentPending,
@@ -233,6 +244,16 @@ export class AgentView extends ItemView {
   const actions = composer.createDiv({ cls: "obsidiai-composer-actions" });
   const contextActions = actions.createDiv({ cls: "obsidiai-context-actions" });
   this.iconButton(contextActions, "Attach note", "paperclip", () => this.attachNote());
+  this.fileInput = composer.createEl("input", { type: "file", attr: { accept: FILE_ACCEPT, multiple: "", "aria-label": "Choose text files or images" } });
+  this.fileInput.hidden = true;
+  this.fileButton = this.iconButton(contextActions, "Attach files from computer", "file-up", () => {
+   if (!this.canAttach()) return;
+   this.filePickerEpoch = this.attachmentEpoch; this.fileInput!.click();
+  });
+  this.registerDomEvent(this.fileInput, "change", () => {
+   const files = Array.from(this.fileInput!.files ?? []); this.fileInput!.value = "";
+   if (this.filePickerEpoch === this.attachmentEpoch) void this.attachFiles(files);
+  });
   const skills = new ButtonComponent(contextActions).onClick(() => { void this.chooseSkill(); });
   skills.buttonEl.addClass("obsidiai-text-button");
   setIcon(skills.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
@@ -259,7 +280,35 @@ export class AgentView extends ItemView {
   this.stopButton = this.iconButton(modelActions, "Stop generation", "square", () => { void controller.stop(); });
   this.stopButton.buttonEl.addClass("obsidiai-stop");
   this.disclosure = composeRegion.createEl("p", { cls: "obsidiai-disclosure" });
-  composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Chats saved in the vault’s plugin folder · @ notes or folders · / skills · Enter to send · Shift + Enter for a new line" });
+  composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Drop text files or images · Paste images or long text · @ notes · / skills · Enter to send" });
+  this.dropHint = stage.createDiv({ cls: "obsidiai-drop-hint", text: "Drop text files or images to attach", attr: { role: "status" } }); this.dropHint.hidden = true;
+  this.registerDomEvent(this.contentEl, "dragenter", event => {
+   if (!event.dataTransfer?.types.includes("Files")) return;
+   event.preventDefault(); event.stopPropagation(); this.dragDepth++;
+   if (this.canAttach()) this.dropHint!.hidden = false;
+  });
+  this.registerDomEvent(this.contentEl, "dragover", event => {
+   if (!event.dataTransfer?.types.includes("Files")) return;
+   event.preventDefault(); event.stopPropagation();
+   event.dataTransfer.dropEffect = this.canAttach() ? "copy" : "none";
+  });
+  this.registerDomEvent(this.contentEl, "dragleave", event => {
+   if (!event.dataTransfer?.types.includes("Files")) return;
+   event.stopPropagation(); this.dragDepth = Math.max(0, this.dragDepth - 1);
+   if (!this.dragDepth) this.dropHint!.hidden = true;
+  });
+  this.registerDomEvent(this.contentEl, "drop", event => {
+   if (!event.dataTransfer?.types.includes("Files")) return;
+   event.preventDefault(); event.stopPropagation(); this.dragDepth = 0; this.dropHint!.hidden = true;
+   const files: File[] = [];
+   for (const item of Array.from(event.dataTransfer.items)) {
+    if (item.kind !== "file") continue;
+    if (item.webkitGetAsEntry?.()?.isDirectory) { new Notice("Drop individual files, not folders."); continue; }
+    const file = item.getAsFile(); if (file) files.push(file);
+   }
+   if (!event.dataTransfer.items.length) files.push(...Array.from(event.dataTransfer.files));
+   void this.attachFiles(files);
+  });
 
   this.unsubscribe = controller.subscribe(() => this.schedule());
   this.hostUnsubscribe = this.host.subscribe(() => this.schedule());
@@ -394,6 +443,68 @@ export class AgentView extends ItemView {
   for (const [path, count] of folders) choices.push({ kind: "folder", value: path, detail: `Attach ${count} Markdown note${count === 1 ? "" : "s"} in this folder and subfolders` });
   return choices.filter(choice => choice.value.toLocaleLowerCase().includes(query)).sort((a, b) => a.value.localeCompare(b.value));
  }
+ private canAttach(): boolean {
+  return !this.closed && !!this.host.controller?.idle && !this.attachmentPending && !this.historyView?.isVisible;
+ }
+ private pasteAttachments(event: ClipboardEvent): void {
+  if (!event.clipboardData) return;
+  const files = Array.from(event.clipboardData.files);
+  const text = event.clipboardData.getData("text/plain");
+  if (files.length) { event.preventDefault(); event.stopPropagation(); void this.attachFiles(files); return; }
+  if (!isLargePaste(text)) return;
+  event.preventDefault(); event.stopPropagation();
+  if (!this.canAttach()) { new Notice("Wait for the current operation before attaching pasted text."); return; }
+  try {
+   const path = `Pasted text ${++this.pastedTextCount}.txt`;
+   this.host.controller!.addAttachment({ kind: "text", path, content: text });
+   this.textarea!.setRangeText("", this.textarea!.selectionStart, this.textarea!.selectionEnd, "end");
+   this.composerSuggest?.dismiss(); this.resizeComposer(); this.schedule();
+   this.attachmentStatus?.setText(`${path} attached. Click its chip to preview. Nothing is sent until Send.`);
+  } catch (error) { new Notice(error instanceof Error ? error.message : "Could not attach pasted text."); }
+ }
+ private async attachFiles(files: readonly File[]): Promise<void> {
+  if (!files.length) return;
+  if (!this.canAttach()) { new Notice("Return to chat and wait for the current operation before attaching files."); return; }
+  const controller = this.host.controller!;
+  const epoch = this.attachmentEpoch;
+  this.attachmentPending = true; this.composerSuggest?.dismiss(); this.schedule();
+  let attached = 0;
+  const failures: string[] = [];
+  this.attachmentStatus?.setText(`Reading ${files.length} file${files.length === 1 ? "" : "s"}…`);
+  try {
+   for (const file of files) {
+    try {
+     const attachment = await readAttachmentFile(file);
+     if (this.closed || epoch !== this.attachmentEpoch || !controller.idle) return;
+     controller.addAttachment(attachment); attached++;
+    } catch (error) {
+     if (this.closed || epoch !== this.attachmentEpoch) return;
+     failures.push(`${file.name.split(/[\\/]/).pop() || "File"}: ${error instanceof Error ? error.message : "Could not read file."}`);
+    }
+   }
+   if (!this.closed && epoch === this.attachmentEpoch) {
+    this.attachmentStatus?.setText(`${attached} attached. Click a chip to preview.${failures.length ? ` ${failures.join(" ")}` : " Nothing is sent until Send."}`);
+    if (failures.length) new Notice(failures.join("\n"), 10000);
+   }
+  } finally { this.attachmentPending = false; this.schedule(); }
+ }
+ private previewAttachment(attachment: Attachment): void {
+  if (this.closed) return;
+  this.contextModal?.close();
+  const preview = new AttachmentPreviewModal(this.app, attachment);
+  this.contextModal = preview; preview.open();
+ }
+ private openModifiedNoteLink(event: MouseEvent): void {
+  if (event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return;
+  const target = event.target as HTMLElement | null;
+  const link = target?.closest?.<HTMLElement>("a.internal-link, .internal-embed");
+  if (!link || !this.timelineEl?.contains(link)) return;
+  const path = link.getAttribute("data-href") ?? link.getAttribute("href") ?? link.getAttribute("src") ?? link.getAttribute("data-src");
+  if (!path || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(path)) return;
+  const source = link.closest<HTMLElement>(".obsidiai-message")?.dataset.sourcePath ?? "";
+  event.preventDefault(); event.stopImmediatePropagation();
+  void this.app.workspace.openLinkText(path, source, "tab").catch(() => new Notice("Could not open the note in a new tab."));
+ }
  private attachNote(): void {
   if (this.closed || !this.host.controller?.idle || this.attachmentPending) return;
   const epoch = this.attachmentEpoch;
@@ -414,19 +525,19 @@ export class AgentView extends ItemView {
   try {
    for (const file of files) {
     if (this.closed || epoch !== this.attachmentEpoch || !controller.idle) return;
-    if (controller.attachments.some(a => a.path === file.path)) { duplicate++; continue; }
+    if (controller.attachments.some(a => a.kind === "note" && a.path === file.path)) { duplicate++; continue; }
     const path = file.path;
     try {
      const content = await this.app.vault.read(file);
      if (this.closed || epoch !== this.attachmentEpoch || !controller.idle) return;
      if (file.path !== path || this.app.vault.getFileByPath(path) !== file) throw new Error("Note moved or removed");
      validateVaultPath(path, this.app.vault.configDir);
-     if (controller.attachments.some(a => a.path === path)) { duplicate++; continue; }
-     controller.addAttachment(path, content); attached++;
+     if (controller.attachments.some(a => a.kind === "note" && a.path === path)) { duplicate++; continue; }
+     controller.addAttachment({ kind: "note", path, content }); attached++;
     } catch { failures.push(path); }
    }
    if (!this.closed && epoch === this.attachmentEpoch) {
-    const summary = `${choice.value}${choice.kind === "folder" ? "/" : ""}: ${attached} attached${duplicate ? `, ${duplicate} already attached` : ""}${!files.length ? "; no eligible notes remain" : ""}${failures.length ? `. Could not attach ${failures.length} (unreadable, changed, or over 200,000 characters): ${failures.join(", ")}` : ""}`;
+    const summary = `${choice.value}${choice.kind === "folder" ? "/" : ""}: ${attached} attached${duplicate ? `, ${duplicate} already attached` : ""}${!files.length ? "; no eligible notes remain" : ""}${failures.length ? `. Could not attach ${failures.length} (unreadable, changed, or attachment limits exceeded): ${failures.join(", ")}` : ""}`;
     this.attachmentStatus?.setText(summary);
     if (failures.length || !files.length) new Notice(summary, 10000);
    }
@@ -434,7 +545,7 @@ export class AgentView extends ItemView {
  }
  private async send(): Promise<void> {
   const controller = this.host.controller;
-  if (!controller || !this.textarea || !controller.idle || this.attachmentPending || (!this.textarea.value.trim() && !controller.selectedSkills.size)) return;
+  if (!controller || !this.textarea || !controller.idle || this.attachmentPending || (!this.textarea.value.trim() && !controller.selectedSkills.size && !controller.attachments.length)) return;
   if (getConnectionBusy(this.host)) { new Notice("Wait for the connection operation to finish."); return; }
   if (!controller.ready) { new Notice(controller.setupMessage); return; }
   const draft = this.textarea.value;
@@ -445,10 +556,10 @@ export class AgentView extends ItemView {
   this.attachmentPending = true; this.schedule();
   try {
    if (autoAttach) {
-    const snapshots = await this.host.captureOpenNotes([...this.excludedOpenNotes, ...controller.attachments.map(a => a.path)]);
+    const snapshots = await this.host.captureOpenNotes([...this.excludedOpenNotes, ...controller.attachments.filter(a => a.kind === "note").map(a => a.path)]);
     if (this.closed || epoch !== this.attachmentEpoch || !controller.idle || !this.host.settings.autoAttachOpenNotes) return;
     for (const snapshot of snapshots) {
-     controller.addAttachment(snapshot.path, snapshot.content);
+     controller.addAttachment({ kind: "note", path: snapshot.path, content: snapshot.content });
      automaticIds.push(controller.attachments.at(-1)!.id);
     }
    }
@@ -510,10 +621,11 @@ export class AgentView extends ItemView {
    .setTooltip(this.host.settings.autoAttachOpenNotes ? "Open-note context is on. Visible Markdown tabs are captured at Send, including unsaved edits. Remove a chip to exclude a note for this message." : "Automatically attach open Markdown notes at Send. Their contents go to your provider and saved chat history.");
   this.openNotesButton!.buttonEl.setAttrs({ "aria-pressed": String(this.host.settings.autoAttachOpenNotes), "aria-label": "Automatically attach open notes" });
   this.permissionButton!.buttonEl.setAttr("data-mode", controller.permissionMode);
-  this.disclosure!.setText(`The agent may read notes, metadata, graph links, skills, and non-secret plugin manifests and send context to your provider. ${PERMISSION_DESCRIPTIONS[controller.permissionMode]} Plugin changes can run third-party code. ${controller.historyMessage}`);
+  this.disclosure!.setText(`The agent may send notes, metadata, graph links, skills, and non-secret plugin manifests to your provider. Attached text and images are sent on Send and saved in chat history. ${PERMISSION_DESCRIPTIONS[controller.permissionMode]} Plugin changes can run third-party code. ${controller.historyMessage}`);
   this.newButton!.setDisabled(!controller.idle || this.attachmentPending);
   this.historyButton!.setDisabled(!controller.idle || this.attachmentPending);
-  this.sendButton!.setDisabled(!controller.idle || !controller.ready || busy || this.attachmentPending || (!this.textarea!.value.trim() && !controller.selectedSkills.size));
+  this.sendButton!.setDisabled(!controller.idle || !controller.ready || busy || this.attachmentPending || (!this.textarea!.value.trim() && !controller.selectedSkills.size && !controller.attachments.length));
+  this.fileButton!.setDisabled(!this.canAttach());
   if (!controller.idle) this.composerSuggest?.dismiss();
   this.sendButton!.buttonEl.hidden = !controller.idle;
   this.stopButton!.buttonEl.hidden = controller.idle;
@@ -521,11 +633,20 @@ export class AgentView extends ItemView {
 
   const chipKeys = new Set<string>();
   for (const attachment of controller.attachments) {
-   const key = `note:${attachment.id}`; chipKeys.add(key);
-   if (!this.draftChips.has(key)) this.addDraftChip(key, attachment.path, "file-text", () => controller.removeAttachment(attachment.id));
+   const key = `attachment:${attachment.id}`; chipKeys.add(key);
+   if (!this.draftChips.has(key)) {
+    const chip = this.chips!.createDiv({ cls: "obsidiai-draft-attachment" });
+    const preview = chip.createEl("button", { cls: "obsidiai-chip", attr: { type: "button", "aria-label": `Preview attachment: ${attachment.path}`, title: `Preview ${attachment.kind === "image" ? "image" : "text"}: ${attachment.path}` } });
+    setIcon(preview.createSpan({ attr: { "aria-hidden": "true" } }), attachment.kind === "image" ? "image" : "file-text");
+    preview.createSpan({ cls: "obsidiai-chip-label", text: attachment.path });
+    preview.addEventListener("click", () => this.previewAttachment(attachment));
+    const remove = chip.createEl("button", { cls: "obsidiai-chip obsidiai-attachment-remove", attr: { type: "button", "aria-label": `Remove attachment: ${attachment.path}`, title: "Remove attachment" } });
+    setIcon(remove, "x"); remove.addEventListener("click", () => controller.removeAttachment(attachment.id));
+    this.draftChips.set(key, chip);
+   }
   }
   if (this.host.settings.autoAttachOpenNotes && controller.idle && !this.attachmentPending) {
-   const manualPaths = new Set(controller.attachments.map(a => a.path));
+   const manualPaths = new Set(controller.attachments.filter(a => a.kind === "note").map(a => a.path));
    for (const path of this.host.openNotePaths()) {
     if (manualPaths.has(path) || this.excludedOpenNotes.has(path)) continue;
     const key = `open:${path}`; chipKeys.add(key);
@@ -542,7 +663,10 @@ export class AgentView extends ItemView {
   }
   for (const [key, button] of this.draftChips) {
    if (!chipKeys.has(key)) { button.remove(); this.draftChips.delete(key); }
-   else button.disabled = !controller.idle || this.attachmentPending;
+   else {
+    if (button.tagName === "BUTTON") (button as HTMLButtonElement).disabled = !controller.idle || this.attachmentPending;
+    for (const child of button.querySelectorAll<HTMLButtonElement>("button")) child.disabled = !controller.idle || this.attachmentPending;
+   }
   }
   this.chips!.hidden = chipKeys.size === 0;
   const ids = new Set(controller.timeline.map(item => item.id));
@@ -619,6 +743,7 @@ export class AgentView extends ItemView {
   let rendered = this.rendered.get(item.id);
   if (!rendered) {
    const el = parent.createEl(item.kind === "tool" ? "details" : "div", { cls: `obsidiai-message obsidiai-${item.kind}` });
+   el.dataset.sourcePath = item.sourcePath;
    let status: HTMLElement | undefined;
    let context: HTMLElement | undefined;
    let notice: HTMLElement | undefined;
@@ -641,14 +766,21 @@ export class AgentView extends ItemView {
     setIcon(author.createSpan({ cls: "obsidiai-assistant-logo", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
     author.createSpan({ text: "ObsidiAI" });
    }
-   if (item.kind === "user" && (item.attachmentPaths?.length || item.skillNames?.length)) {
+   const sentAttachments = item.kind === "user" ? this.host.controller!.getSentAttachments(item) : [];
+   if (item.kind === "user" && (sentAttachments.length || item.attachmentPaths?.length || item.skillNames?.length)) {
     const attachments = el.createDiv({ cls: "obsidiai-sent-context", attr: { "aria-label": "Attached context" } });
-    for (const path of item.attachmentPaths ?? []) {
+    for (const attachment of sentAttachments) {
+     const preview = attachments.createEl("button", { cls: "obsidiai-sent-attachment", attr: { type: "button", "aria-label": `Preview attachment: ${attachment.path}`, title: attachment.path } });
+     setIcon(preview.createSpan({ attr: { "aria-hidden": "true" } }), attachment.kind === "image" ? "image" : "file-text");
+     preview.createSpan({ text: attachment.path });
+     preview.addEventListener("click", () => this.previewAttachment(attachment));
+    }
+    for (const path of sentAttachments.length ? [] : item.attachmentPaths ?? []) {
      try { validateVaultPath(path, this.app.vault.configDir); } catch { continue; }
      const link = attachments.createEl("a", { cls: "internal-link obsidiai-sent-attachment", href: path, attr: { "aria-label": `Open attached note: ${path}`, title: path } });
      setIcon(link.createSpan({ attr: { "aria-hidden": "true" } }), "file-text");
      link.createSpan({ text: path });
-     link.addEventListener("click", event => { event.preventDefault(); void this.app.workspace.openLinkText(path, ""); });
+     link.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); void this.app.workspace.openLinkText(path, ""); });
     }
     for (const name of item.skillNames ?? []) {
      const skill = attachments.createSpan({ cls: "obsidiai-sent-attachment" });
@@ -724,7 +856,7 @@ export class AgentView extends ItemView {
     const links = rendered.el.createDiv({ cls: "obsidiai-tool-links" });
     for (const path of paths) {
      const link = links.createEl("a", { text: path, cls: "internal-link", href: path });
-     link.addEventListener("click", event => { event.preventDefault(); void this.app.workspace.openLinkText(path, item.sourcePath); });
+     link.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); void this.app.workspace.openLinkText(path, item.sourcePath); });
     }
    }
   }
@@ -732,6 +864,7 @@ export class AgentView extends ItemView {
  private release(): void {
   this.closed = true;
   this.attachmentEpoch++; this.composerSuggest?.dispose(); this.contextModal?.close();
+  this.dragDepth = 0; this.filePickerEpoch = undefined; this.fileInput = undefined; this.fileButton = undefined; this.dropHint = undefined;
   if (this.historyView) { this.removeChild(this.historyView); this.historyView = undefined; }
   this.modelProbe?.abort(); this.selectionModal?.close();
   this.unsubscribe?.(); this.hostUnsubscribe?.(); this.connectionUnsubscribe?.();

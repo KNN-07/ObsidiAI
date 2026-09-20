@@ -32,6 +32,34 @@ describe("durable chat history", () => {
   fail = false; await store.delete(["a", "b"]);
   expect((await new HistoryStore(adapter, "history.json").list()).map(c => c.id)).toEqual(["keep"]);
  });
+ it("retains legacy path-only history without requiring preview metadata", async () => {
+  const old = conversation("legacy");
+  old.timeline[0]!.attachmentPaths = ["Note.md"];
+  const bytes = JSON.stringify({ version: 1, conversations: [old] });
+  const store = new HistoryStore({ async exists() { return true; }, async read() { return bytes; }, async write() {} }, "history.json");
+  expect((await store.get("legacy")).timeline[0]!.attachmentPaths).toEqual(["Note.md"]);
+ });
+ it("rejects corrupt image preview references rather than exposing unsafe stored content", async () => {
+  const saved = conversation("image");
+  saved.messages = [{ role: "user", content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/svg+xml" }], timestamp: 1 }];
+  saved.timeline[0]!.attachmentReferences = [{ id: "image", kind: "image", path: "image.svg", messageIndex: 0, blockIndex: 0 }];
+  let bytes = JSON.stringify({ version: 1, conversations: [saved] });
+  const original = bytes;
+  const store = new HistoryStore({ async exists() { return true; }, async read() { return bytes; }, async write(_path, value) { bytes = value; } }, "history.json");
+  await expect(store.get("image")).rejects.toThrow("history");
+  await expect(store.save(conversation("replacement"))).rejects.toThrow("history");
+  expect(bytes).toBe(original);
+ });
+ it("refuses invalid preview indices on save before replacing existing history", async () => {
+  let bytes = "";
+  const store = new HistoryStore({ async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path, value) { bytes = value; } }, "history.json");
+  await store.save(conversation("keep"));
+  const original = bytes;
+  const invalid = conversation("invalid");
+  invalid.timeline[0]!.attachmentReferences = [{ id: "text", kind: "text", path: "text.txt", messageIndex: -1, blockIndex: 0 }];
+  await expect(store.save(invalid)).rejects.toThrow("history");
+  expect(bytes).toBe(original);
+ });
  it("preserves unreadable existing history rather than replacing it with a new conversation", async () => {
   let bytes = "{broken";
   const store = new HistoryStore({ async exists() { return true; }, async read() { return bytes; }, async write(_path, value) { bytes = value; } }, "history.json");

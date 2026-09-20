@@ -48,7 +48,7 @@ Try prompts like:
 | **Query structured information** | Filter by folder, exact tags, and frontmatter properties; inspect headings, tasks, links, and file metadata. |
 | **Reuse skills** | Keep instruction-only skills in your vault and choose them from the Skills picker or with `/skill:name`. |
 | **Manage community plugins** | Browse the official catalog and propose install, update, enable, disable, or uninstall operations—with separate approval for each change. |
-| **Quickly include context** | Type `@` to attach notes/folders or `/` for skills. Optionally enable **Open notes** to capture open Markdown tabs when you send. |
+| **Quickly include context** | Select or drop computer text/image files, paste images, and preview large pasted text as attachments. Use `@` for vault notes/folders, `/` for skills, or **Open notes** for current Markdown tabs. |
 | **Resume and organize conversations** | Search saved chats in the integrated History screen, continue with your current model, or select several chats for confirmed bulk deletion. |
 | **Inspect tool activity** | Expand or collapse tool-call chains and individual results. Pending approvals stay visible outside collapsed groups. |
 
@@ -66,7 +66,7 @@ The source build uses a Claude-inspired arrangement with restrained, shadcn-styl
 - **Follow a live answer.** Incoming text gently fades into place while earlier text stays stable. The notebook logo and Thinking indicator pulse while streaming; completed Markdown has a brief transition. Reduced-motion preferences disable these effects.
 - **Use any pane width.** The layout adapts to narrow split panes and Obsidian's light/dark themes. Enter sends; Shift+Enter adds a line. Scrolling upward pauses automatic following; **Jump to latest** resumes it.
 
-**0.1.5** adds an integrated History screen with search, date groups, and multi-select deletion. It retains file-tree browsing, optional open-note context, collapsible tool chains, inline approvals, and native networking fixes from previous releases. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
+**0.1.6** adds computer text/image attachments, drag-and-drop, clipboard images, compact large-paste previews, and Ctrl/Cmd-click note navigation in new tabs. It retains integrated History with bulk deletion, file-tree browsing, optional open-note context, collapsible tool chains, inline approvals, and native networking fixes. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
 
 ## Get started
 
@@ -141,7 +141,7 @@ The read-only `list_files` tool lists visible folders and file paths, including 
 
 Type `@` in the composer and filter by a note or folder path, including spaces and nested paths. Use the arrow keys and Enter, or click a result. Selecting a folder attaches snapshots of permitted Markdown notes in that folder and its descendants; non-Markdown and restricted paths are excluded. Duplicate attachments are skipped, and unreadable, moved, or oversized notes are reported. The attachment status shows the result. Remove individual draft chips before sending if you do not want to include them.
 
-After sending, your message shows the prompt plus compact file/skill labels, not the expanded context payload. Click a file label to open the note. The model still receives the attached snapshots, and saved model context still contains them; hiding the payload in the chat is a presentation change, not a privacy filter. Older saved transcripts retain their original display text.
+After sending, your message shows the prompt plus compact file/skill labels, not the expanded context payload. The model still receives the attached snapshots, and saved model context still contains them; hiding the payload in the chat is a presentation change, not a privacy filter. Older saved transcripts retain their original display text and note links.
 
 **Automatic open-note context:** enable **Open notes** in the composer or **Automatically attach open notes** in Settings. It is **off by default**, and the preference is saved. Dashed chips show the open Markdown tabs to be included; remove a chip to exclude that note for the next message. At Send, editable tabs contribute current unsaved text; reading/deferred tabs use their saved contents. Duplicate tabs are combined, and a manual attachment or editor selection takes precedence over automatic context for the same path. Hidden/configuration paths are excluded. Oversized notes (over 200,000 characters) or context that changes during preparation stop submission rather than being silently truncated.
 
@@ -149,13 +149,27 @@ Automatic context is captured anew for each message; exclusions reset after subm
 
 Type `/` at the start of a draft to choose a skill. Selection inserts `/skill:name `; add arguments and then send. It does not submit the prompt automatically. Escape dismisses suggestions; Shift+Enter inserts a newline.
 
+### Computer files, images, and pasted text
+
+Use **Attach files from computer** beside **Attach note** to select multiple files, or **drag and drop files onto the chat**. Supported inputs include UTF-8 text, Markdown, CSV/TSV, JSON/YAML/TOML, logs, common source/config files, and **PNG, JPEG, WebP, or GIF images**. Clipboard images can also be pasted directly into the composer. Binary documents and other text encodings are not converted.
+
+Pastes of **4,000 characters or 40 lines** become a temporary `.txt` attachment instead of filling the composer. Short pastes remain normal text. Existing draft text outside the selected range is preserved. These attachments are in-memory snapshots, not new vault notes or files written into an operating-system temporary folder.
+
+Click a draft or newly sent attachment chip to preview its full text or image; use the separate **×** button to remove a draft attachment. Text previews display raw content without executing HTML or rendering embedded resources. Sent previews remain available after reopening saved history. You can send attachments without an accompanying typed prompt.
+
+**Limits:** 200,000 characters per text attachment, 5 MiB per image, at most 20 attachments and 20 MiB of total attachment data per message. Files are not silently truncated. Unsupported files and size-limit failures are reported; successfully attached files remain in the draft. Images are submitted as actual image inputs and require a model advertising image support. Switching an image-containing conversation to a text-only model blocks Send rather than silently dropping the images.
+
+**Privacy:** nothing is uploaded merely by selecting, dropping, or pasting. Only the external filename—not its computer directory—is retained. On Send, attachment contents go to the selected provider and are stored in the plugin’s unencrypted chat history. An image preview does not imply that a remote vision provider has been verified.
+
+**Output links:** Ctrl-click (Cmd-click on macOS) an internal note link or embedded note in an assistant response to open it in a **new tab**, preserving the chat tab. This also applies to generated tool-result note links; native source-relative links and heading references are retained.
+
 ### Saved conversations
 
 The **History** button beside **New conversation** opens saved chats in an integrated screen inside the chat tab, matching its typography, spacing, and light/dark themes instead of opening a popup. Search titles, providers, or models; browse Today, Yesterday, Previous 7 days, and Earlier groups. Long lists show 50 conversations at a time with **Show more**; search covers all saved conversations.
 
 Click a conversation—or press Enter in search to open its first result—to restore its transcript and model context. Future requests use your currently selected provider/model; permissions reset to **Ask before changes**. **Back to chat** or Escape returns without opening a different conversation and preserves your unsent draft. Conversations are saved after a response settles, including tool results and sent context. **New conversation** keeps the previous chat in history.
 
-**Storage:** `.obsidian/plugins/obsidiai/history.json` by default (or your custom vault configuration folder). History is separate from credentials and settings, but it can contain sent note excerpts, skill instructions, and tool results. The plugin does not encrypt this file; vault sync and backups may copy it. Unsent draft attachments/skill selections and elevated permission modes are not stored. Saved provider credentials are not included.
+**Storage:** `.obsidian/plugins/obsidiai/history.json` by default (or your custom vault configuration folder). History is separate from credentials and settings, but it can contain sent note excerpts, attached text/images, skill instructions, and tool results. The plugin does not encrypt this file; vault sync and backups may copy it. Unsent draft attachments/skill selections and elevated permission modes are not stored. Saved provider credentials are not included.
 
 Use a row’s trash button, then **Delete permanently** in its inline confirmation, to remove one saved chat. Or choose **Select chats**, check several conversations, and click **Delete selected**. **Select all results** includes every search match, even beyond the first 50 displayed rows. Selections survive filtering; the selected count identifies chats outside the current filter. **Clear selection** clears every selection; **Done** leaves selection mode.
 

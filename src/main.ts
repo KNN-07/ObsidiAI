@@ -81,7 +81,7 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
   this.addCommand({ id: "ask-about-selection", name: "Ask agent about selection", editorCheckCallback: (checking, editor, view) => {
    const content = editor.getSelection(); const path = view.file?.path;
    if (!content || !path || !this.controller) return false;
-   if (!checking) { try { this.controller.addAttachment(path, content); void this.openAgent(); } catch (error) { new Notice(error instanceof Error ? error.message : "Could not attach selection."); } }
+   if (!checking) { try { this.controller.addAttachment({ kind: "note", path, content }); void this.openAgent(); } catch (error) { new Notice(error instanceof Error ? error.message : "Could not attach selection."); } }
    return true;
   } });
  }
