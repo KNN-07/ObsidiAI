@@ -41,10 +41,10 @@ export class VaultToolService {
           this.snapshots.set(path, { file, path, content });
           return result({ path, content });
         } } satisfies AgentTool<typeof readSchema>,
-      { name: 'propose_note_edit', label: 'Propose note edit', description: 'Propose one exact unique replacement against a note read in this run; writing requires explicit user approval.', executionMode: 'sequential',
+      { name: 'propose_note_edit', label: 'Propose note edit', description: 'Propose one exact unique replacement against a note read in this run; writing follows the current conversation permission mode.', executionMode: 'sequential',
         parameters: editSchema,
         execute: async (_id, params, signal) => this.edit(params.path, params.oldText, params.newText, signal) } satisfies AgentTool<typeof editSchema>,
-      { name: 'propose_note_create', label: 'Propose note creation', description: 'Propose a new Markdown note in an existing visible folder; writing requires explicit user approval.', executionMode: 'sequential',
+      { name: 'propose_note_create', label: 'Propose note creation', description: 'Propose a new Markdown note in an existing visible folder; writing follows the current conversation permission mode.', executionMode: 'sequential',
         parameters: createSchema,
         execute: async (_id, params, signal) => this.create(params.path, params.content, signal) } satisfies AgentTool<typeof createSchema>,
     ] as AgentTool<any>[];

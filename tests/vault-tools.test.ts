@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ui = vi.hoisted(() => ({ buttons: [] as { text: string; click: () => void }[], modals: [] as { close: () => void }[] }));
 vi.mock('obsidian', () => {
-  interface MockElement { createEl: () => MockElement; createDiv: () => MockElement; empty: () => void; focus: () => void }
-  const element = (): MockElement => ({ createEl: element, createDiv: element, empty() {}, focus() {} });
+  interface MockElement { createEl: () => MockElement; createDiv: () => MockElement; empty: () => void; focus: () => void; addClass: () => void }
+  const element = (): MockElement => ({ createEl: element, createDiv: element, empty() {}, focus() {}, addClass() {} });
   return {
     App: class {},
     TFile: class { constructor(public path: string) {} },
@@ -24,13 +24,13 @@ vi.mock('obsidian', () => {
       constructor() { ui.buttons.push(this.button); }
       setButtonText(text: string) { this.button.text = text; return this; }
       setCta() { return this; }
+      setWarning() { return this; }
       onClick(click: () => void) { this.button.click = click; return this; }
     },
   };
 });
-vi.mock('../src/ui/plugin-approval-modal', () => ({ PluginApprovalModal: class {} }));
 import { MarkdownView, TFile, TFolder, type App } from 'obsidian';
-import { ApprovalController } from '../src/ui/approval-modal';
+import { ApprovalController, type PermissionMode, type Proposal } from '../src/ui/approval-modal';
 import { VaultToolService, MAX_NOTE_CHARACTERS } from '../src/agent/vault-tools';
 import { validateVaultPath } from '../src/vault/paths';
 import { Agent } from '@earendil-works/pi-agent-core';
@@ -189,6 +189,93 @@ describe('approval-bound note operations', () => {
   it('allows only one pending approval', async () => {
     const f = fixture(); await f.read(); const first = f.edit();
     await expect(f.edit()).rejects.toThrow('already pending'); click('Reject'); await first;
+  });
+});
+
+describe('conversation permission boundary', () => {
+  it('automatically applies exact note edits and creations without opening review', async () => {
+    const f = fixture(); f.approval.setMode('auto-approve-notes'); await f.read();
+    expect((await f.edit()).details.outcome).toBe('applied');
+    expect(f.contents.get(f.alpha)).toBe('# Alpha\nStatus: reviewed\n');
+    expect((await f.call('propose_note_create', { path: 'Projects/New.md', content: '# New\n' })).details.outcome).toBe('applied');
+    expect(f.contents.get(f.files.get('Projects/New.md')!)).toBe('# New\n');
+    expect(ui.modals).toHaveLength(0);
+  });
+  it('rejects note mutations in read-only mode while retaining reads', async () => {
+    const f = fixture(); f.approval.setMode('read-only'); await f.read();
+    expect((await f.edit()).details.outcome).toBe('rejected');
+    expect((await f.call('propose_note_create', { path: 'Projects/New.md', content: 'new' })).details.outcome).toBe('rejected');
+    expect(f.contents.get(f.alpha)).toBe('# Alpha\nStatus: draft\n');
+    expect(f.files.has('Projects/New.md')).toBe(false);
+    expect(ui.modals).toHaveLength(0);
+  });
+  it('retains read-before-edit, unique replacement and path boundaries in automatic mode', async () => {
+    const f = fixture(); f.approval.setMode('auto-approve-notes');
+    await expect(f.edit()).rejects.toThrow('current run');
+    f.contents.set(f.alpha, 'aaaa'); await f.read();
+    for (const oldText of ['', 'aa', 'missing']) await expect(f.call('propose_note_edit', { path: f.alpha.path, oldText, newText: 'x' })).rejects.toThrow('exactly once');
+    await expect(f.call('propose_note_create', { path: '../Escape.md', content: 'escape' })).rejects.toThrow();
+    await expect(f.call('propose_note_create', { path: 'Missing/New.md', content: 'new' })).rejects.toThrow('parent folder');
+    expect(f.contents.get(f.alpha)).toBe('aaaa');
+    expect([...f.files.keys()]).toEqual(['Projects/Alpha.md']);
+  });
+  it.each(['persisted', 'editor', 'deleted', 'replaced', 'renamed'])('retains the %s stale-edit guard in automatic mode', async kind => {
+    const f = fixture(); f.approval.setMode('auto-approve-notes'); await f.read();
+    const pending = f.edit();
+    const failure = expect(pending).rejects.toThrow('Note changed since review');
+    if (kind === 'persisted') f.contents.set(f.alpha, 'user edit');
+    if (kind === 'editor') f.leaves.push({ view: Object.assign(new MarkdownView({} as never), { file: f.alpha, editor: { getValue: () => 'unsaved user edit' } }) });
+    if (kind === 'deleted') f.files.delete(f.alpha.path);
+    if (kind === 'replaced') f.add(f.alpha.path, 'replacement');
+    if (kind === 'renamed') { f.files.delete(f.alpha.path); f.alpha.path = 'Projects/Renamed.md'; f.files.set(f.alpha.path, f.alpha); }
+    await failure;
+    expect(f.contents.get(f.alpha)).toBe(kind === 'persisted' ? 'user edit' : '# Alpha\nStatus: draft\n');
+    if (kind === 'replaced') expect(f.contents.get(f.files.get('Projects/Alpha.md')!)).toBe('replacement');
+  });
+  it('preserves a creation collision during automatic approval', async () => {
+    const f = fixture(); f.approval.setMode('auto-approve-notes');
+    const pending = f.call('propose_note_create', { path: 'Projects/New.md', content: 'proposal' });
+    const failure = expect(pending).rejects.toThrow('already exists');
+    const other = f.add('Projects/New.md', 'independent');
+    await failure; expect(f.contents.get(other)).toBe('independent');
+  });
+  it('cancels automatic proposals before commit and rejects already-aborted requests', async () => {
+    const f = fixture(); f.approval.setMode('auto-approve-notes'); await f.read();
+    const abort = new AbortController();
+    const edit = f.edit(abort.signal);
+    const create = f.call('propose_note_create', { path: 'Projects/New.md', content: 'new' }, abort.signal);
+    abort.abort();
+    expect((await edit).details.outcome).toBe('cancelled');
+    expect((await create).details.outcome).toBe('cancelled');
+    expect(await f.approval.request({ kind: 'note-change', operation: 'create', path: 'Projects/New.md', before: '', after: 'new' }, abort.signal)).toBe('reject');
+    expect(f.contents.get(f.alpha)).toBe('# Alpha\nStatus: draft\n');
+    expect(f.files.has('Projects/New.md')).toBe(false);
+    expect(ui.modals).toHaveLength(0);
+  });
+  const pluginProposal: Proposal = {
+    kind: 'plugin-change',
+    change: {
+      action: 'enable', id: 'fixture', name: 'Fixture',
+      observed: { installed: true, version: '1.0.0', configuredEnabled: false, loaded: false },
+      release: null, repo: null, targetVersion: null, effects: ['Enable plugin code.'],
+    },
+  };
+  it('keeps plugin decisions explicit in automatic note mode and reserves the pending decision', async () => {
+    const f = fixture(); f.approval.setMode('auto-approve-notes'); await f.read();
+    const pending = f.approval.request(pluginProposal);
+    expect(ui.modals).toHaveLength(1);
+    await expect(f.edit()).rejects.toThrow('already pending');
+    expect(() => f.approval.setMode('read-only')).toThrow('pending');
+    click('Cancel'); expect(await pending).toBe('reject');
+    const accepted = f.approval.request(pluginProposal);
+    click('Approve enable'); expect(await accepted).toBe('approve');
+    expect(f.contents.get(f.alpha)).toBe('# Alpha\nStatus: draft\n');
+  });
+  it('rejects plugin changes without a modal in read-only mode and fails closed on invalid modes', async () => {
+    const f = fixture(); f.approval.setMode('read-only');
+    expect(() => f.approval.setMode('approve-everything' as PermissionMode)).toThrow('Invalid permission mode');
+    expect(await f.approval.request(pluginProposal)).toBe('reject');
+    expect(ui.modals).toHaveLength(0);
   });
 });
 

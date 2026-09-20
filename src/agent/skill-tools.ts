@@ -54,7 +54,11 @@ export class SkillToolService {
     await this.catalog.refresh();
     const snapshot = this.catalog.capture();
     const selected = new Set(selectedNames);
-    for (const name of selected) if (!snapshot.entries.some(entry => entry.name === name)) throw new Error(`Unknown selected skill: ${name}`);
+    for (const name of selected) {
+      const entry = snapshot.entries.find(entry => entry.name === name);
+      if (!entry) throw new Error(`Unknown selected skill: ${name}`);
+      if (!entry.userInvocable) throw new Error(`Skill is not available for explicit invocation: ${name}`);
+    }
     this.snapshot = snapshot;
     this.selected = selected;
   }

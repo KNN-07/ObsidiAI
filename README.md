@@ -15,7 +15,7 @@ An AI agent in a native Obsidian tab. Ask questions across your notes, explore t
 
 Powered by [pi](https://github.com/earendil-works/pi), ObsidiAI runs inside the desktop plugin. No separate agent installation, terminal session, or embedded web app.
 
-> **Early preview · Desktop only.** Behavioral tests and isolated bundle checks cover the implementation. The redesigned native UI has been checked in a disposable vault on Obsidian 1.13.7, using a local scripted provider—not a remote model. Successful remote-provider login and actual native plugin-manager lifecycle effects remain unverified. Start in a disposable vault, not your only copy of important notes.
+> **Early preview · Desktop only.** Behavioral tests and isolated bundle checks cover the implementation. The native UI, permissions, quick context, and saved history have been checked in a disposable vault on Obsidian 1.13.7. A real NVIDIA request and cancellation were also verified there; successful OAuth login and actual native plugin-manager lifecycle effects remain unverified. Start in a disposable vault, not your only copy of important notes.
 
 ![Native ObsidiAI chat in Obsidian's light theme, with model and thinking-effort controls in the composer](assets/chat-light.png)
 
@@ -25,8 +25,8 @@ Powered by [pi](https://github.com/earendil-works/pi), ObsidiAI runs inside the 
 
 1. **Bring context.** Attach a note, capture an editor selection, or ask the agent to find relevant notes. Attachments stay in the draft until you send.
 2. **Work with your vault.** The agent can search notes, inspect metadata, follow links, and load reusable skill instructions.
-3. **Review the proposal.** Note edits show a before/after diff. Plugin changes have their own approval dialog and code-execution warnings.
-4. **Decide what happens.** Approve or reject each change. If a note changes while you review it, the agent must read it again and request a new approval.
+3. **Review the proposal.** In the default **Ask before changes** mode, note edits show a before/after diff. Plugin changes have their own approval dialog and code-execution warnings.
+4. **Decide what happens.** Approve or reject each change, use **Read-only**, or explicitly enable **Auto-approve notes** for this conversation. Note conflicts still require a fresh read; plugin changes always require individual approval.
 
 Try prompts like:
 
@@ -40,27 +40,31 @@ Try prompts like:
 
 | Capability | How it helps |
 | --- | --- |
-| **Chat in your workspace** | A centered conversation column, streaming responses, and a rounded composer with note attachments, Skills, and model selection. Tool details collapse; approval and outcome badges stay visible. |
+| **Chat in your workspace** | A centered conversation column, streaming responses, and a composer with note attachments, Skills, model selection and permissions. Subtle animations respect reduced-motion settings. |
 | **Keep multiple providers connected** | Manage one saved login per provider in Settings. Add, reconnect, or disconnect each independently; search available models across providers directly from chat. |
 | **Choose thinking effort** | Select only the levels supported by the current model. Your preference is saved; the effective level adapts when you switch models. Higher effort may use more tokens and time. |
-| **Search and edit notes** | Literal text search, bounded note reads, and individually approved Markdown edits or new notes. |
+| **Search and edit notes** | Literal text search, bounded note reads, and Markdown edits or new notes governed by the conversation's permission mode. |
 | **Explore your knowledge graph** | Query backlinks, outlinks, neighborhoods, shortest paths, unresolved links, and orphan notes using Obsidian's native cache. |
 | **Query structured information** | Filter by folder, exact tags, and frontmatter properties; inspect headings, tasks, links, and file metadata. |
 | **Reuse skills** | Keep instruction-only skills in your vault and choose them from the Skills picker or with `/skill:name`. |
 | **Manage community plugins** | Browse the official catalog and propose install, update, enable, disable, or uninstall operations—with separate approval for each change. |
+| **Quickly include context** | Type `@` to attach a note or a folder's permitted Markdown descendants; type `/` to choose a user-invocable skill. |
+| **Resume conversations** | Open saved chats from History, continue with your current model, or delete the plugin's saved copy. |
 
 Provider availability is not a promise of account access. Subscription eligibility, provider policy, credentials, and network conditions still apply. Graph and metadata results identify partial or provisional cache state rather than treating it as definitive vault truth.
+
+NVIDIA can advertise models whose inference endpoint returns **HTTP 404** for the current account. This is different from an authentication failure; choose another model. A native request to `openai/gpt-oss-20b` succeeded during verification, while some other advertised models returned 404. **0.1.2** fixes a renderer/Node networking incompatibility that caused “Connection error” or stalled streams inside Obsidian.
 
 ### Conversation layout
 
 The source build uses a Claude-inspired arrangement with restrained, shadcn-style controls, implemented entirely with native Obsidian components. No embedded web app or additional UI framework.
 
 - **Start in the center.** Suggested prompts fill the draft without sending it. Provider setup remains visible until a model is ready.
-- **Keep actions with the draft.** The paperclip, Skills picker, model selector, thinking-effort picker, and Send/Stop controls sit inside the composer. Selected context appears as removable chips.
+- **Keep actions with the draft.** The paperclip, Skills picker, model selector, thinking-effort picker, permissions control, and Send/Stop controls sit inside the composer. Selected context appears as removable chips.
 - **Read without clutter.** User messages align right; assistant responses use a readable column capped at 760px. Expand a tool card for its result and note links. Errors expand automatically; code-execution warnings and partial-result notices remain visible when collapsed.
 - **Use any pane width.** The layout adapts to narrow split panes and Obsidian's light/dark themes. Enter sends; Shift+Enter adds a line. Scrolling upward pauses automatic following; **Jump to latest** resumes it.
 
-The redesigned interface, multi-provider login list, and thinking-effort selector are included in **0.1.1**. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
+**0.1.2** includes permissions, quick context suggestions, animations, persistent history, and the native networking fix, alongside the multi-provider login list and thinking-effort selector introduced in 0.1.1. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
 
 ## Get started
 
@@ -111,11 +115,35 @@ Then install the three generated/root files using the same steps above. `main.js
 4. Run **ObsidiAI: Open agent tab** from the command palette, or use the bot ribbon icon.
 5. Click the model control inside the composer and search across available providers and models. Use **Refresh models** in Settings when a dynamic catalog needs updating.
 6. Use the brain-icon **thinking effort** control to choose a supported level. It is disabled when the model has no adjustable effort. Model, effort, and authentication changes are locked during an active run.
-7. Write a prompt. Use **Attach note** or **Skills** when you want to add explicit context.
+7. Write a prompt. Type **`@`** for notes/folders or **`/`** for skills; **Attach note** and **Skills** remain available as buttons.
 
 You can also select text in an editor and run **ObsidiAI: Ask agent about selection**. This adds a draft attachment; it does not send anything automatically.
 
 Switching providers preserves the conversation; your next request sends its context to the newly selected provider. This is a multi-provider list, not multiple accounts for the same provider. Reconnecting replaces only that provider's saved login. Disconnect removes its plugin-stored login, not ambient environment/profile credentials.
+
+### Conversation permissions
+
+The shield control in the composer offers:
+
+- **Ask before changes** — default; review each note or plugin change.
+- **Read-only** — inspect context without changing notes or plugins.
+- **Auto-approve notes** — note edits and creation run without individual approval dialogs. Plugin lifecycle changes still require explicit approval.
+
+Permission changes are locked during a run. New conversations reset to **Ask before changes**; elevated permissions are not saved. Automatic note approval does not bypass current-run reads, path restrictions, size limits, collision checks, or stale-content/open-editor checks. It does not grant shell or arbitrary filesystem access.
+
+### Quick context and skills
+
+Type `@` in the composer and filter by a note or folder path, including spaces and nested paths. Use the arrow keys and Enter, or click a result. Selecting a folder attaches snapshots of permitted Markdown notes in that folder and its descendants; non-Markdown and restricted paths are excluded. Duplicate attachments are skipped, and unreadable, moved, or oversized notes are reported. The attachment status shows the result. Remove individual draft chips before sending if you do not want to include them.
+
+Type `/` at the start of a draft to choose a skill. Selection inserts `/skill:name `; add arguments and then send. It does not submit the prompt automatically. Escape dismisses suggestions; Shift+Enter inserts a newline.
+
+### Saved conversations
+
+The **History** button beside **New conversation** lists saved conversations by title and date. Conversations are saved after a response settles, including tool results and sent context. **New conversation** keeps the previous chat in history. **Open** restores its transcript and model context; the next request uses your currently selected provider/model, as disclosed in the dialog. Permissions reset to **Ask before changes**.
+
+**Storage:** `.obsidian/plugins/obsidiai/history.json` by default (or your custom vault configuration folder). History is separate from credentials and settings, but it can contain sent note excerpts, skill instructions, and tool results. The plugin does not encrypt this file; vault sync and backups may copy it. Unsent draft attachments/skill selections and elevated permission modes are not stored. Saved provider credentials are not included.
+
+Choose **Delete**, then **Delete permanently**, to remove a conversation from the plugin's history. Copies already synced or backed up are outside that deletion. If reading or saving fails, the UI reports it rather than silently replacing unreadable history.
 
 <details>
 <summary>Saved provider logins in the native settings dialog</summary>
@@ -156,15 +184,15 @@ Choose **Skills** in the agent tab, run **ObsidiAI: Choose skill**, or begin a m
 /skill:link-review Focus on Projects/Alpha.md
 ```
 
-Selecting a skill adds a removable draft chip. Skill resources are restricted to plain-text files inside the activated skill's directory. Set `disable-model-invocation: true` in frontmatter to require explicit user selection. An `allowed-tools` declaration is descriptive only: it cannot grant execution permissions or bypass approvals.
+Selecting a skill adds a removable draft chip. Skill resources are restricted to plain-text files inside the activated skill's directory. Set `disable-model-invocation: true` in frontmatter to require explicit user selection; these skills remain available in `/` suggestions. Set `user-invocable: false` to hide a model-only skill from the picker and slash suggestions and reject explicit `/skill:name` invocation. An `allowed-tools` declaration is descriptive only: it cannot grant execution permissions or bypass approvals.
 
 ## Privacy and control
 
 - **Context goes to your selected provider.** After you send a prompt, the agent can read permitted notes, metadata, graph data, skills, and non-secret plugin manifests and include returned context in model requests. Attaching a note is not a limit on the other notes it may inspect during that run.
 - **No background vault uploads or embeddings.** There is no second persisted search index.
-- **Conversation history stays in memory.** Transcripts, attachment snapshots, and proposals are not saved to plugin settings. Closing the tab retains the settled conversation for reopening during the loaded plugin's lifetime; New conversation resets it.
+- **Conversation history is stored in the plugin folder.** Settled transcripts, sent context, and tool results are persisted to `history.json`, not plugin settings. Unsent drafts remain in memory. History can be reopened or deleted through the native dialog; see the storage/sync warning above.
 - **Plugin credentials use Obsidian SecretStorage.** Non-secret preferences are saved separately. ObsidiAI does not automatically import pi CLI credentials from `~/.pi/agent/auth.json`; provider-supported ambient environment/profile authentication remains available.
-- **Changes require individual approval.** There is no approve-all switch. Edits are bound to the reviewed content and checked for conflicts with both saved notes and open editor buffers.
+- **You control note permissions.** Each new conversation defaults to individual approval; Read-only blocks changes, while Auto-approve notes skips only note dialogs. Plugin changes always need individual approval. Edits remain bound to a current-run snapshot and checked for conflicts with both saved notes and open editor buffers.
 - **Stop is not undo.** It prevents pending approvals and subsequent work, but an atomic write or native plugin operation already in progress may finish. Applied changes stay applied.
 
 ### Community-plugin safety

@@ -6,6 +6,7 @@ import { PluginApprovalModal } from './plugin-approval-modal';
 export type NoteProposal = Readonly<{ kind: 'note-change'; operation: 'edit' | 'create'; path: string; before: string; after: string }>;
 export type Proposal = NoteProposal | Readonly<{ kind: 'plugin-change'; change: PluginChangeProposal }>;
 export type ApprovalDecision = 'approve' | 'reject';
+export type PermissionMode = 'read-only' | 'ask' | 'auto-approve-notes';
 
 export class ApprovalModal extends Modal {
   private decided = false;
@@ -38,9 +39,16 @@ export class ApprovalModal extends Modal {
 }
 
 export class ApprovalController {
+  private permissionMode: PermissionMode = 'ask';
   private pending: { settle: (decision: ApprovalDecision) => void } | null = null;
   private readonly listeners = new Set<(pending: boolean) => void>();
   constructor(private readonly app: App) {}
+  get mode(): PermissionMode { return this.permissionMode; }
+  setMode(mode: PermissionMode): void {
+    if (mode !== 'read-only' && mode !== 'ask' && mode !== 'auto-approve-notes') throw new Error('Invalid permission mode.');
+    if (this.pending) throw new Error('Cannot change permissions while an approval is pending.');
+    this.permissionMode = mode;
+  }
   subscribe(listener: (pending: boolean) => void): () => void {
     this.listeners.add(listener);
     listener(this.pending !== null);
@@ -50,6 +58,8 @@ export class ApprovalController {
   request(proposal: Proposal, signal?: AbortSignal): Promise<ApprovalDecision> {
     if (signal?.aborted) return Promise.resolve('reject');
     if (this.pending) return Promise.reject(new Error('Another approval is already pending.'));
+    if (this.permissionMode === 'read-only') return Promise.resolve('reject');
+    if (this.permissionMode === 'auto-approve-notes' && proposal.kind === 'note-change') return Promise.resolve('approve');
     const { promise, resolve } = Promise.withResolvers<ApprovalDecision>();
     let settled = false;
     let modal: Modal | undefined;

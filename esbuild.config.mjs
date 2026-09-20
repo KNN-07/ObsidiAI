@@ -10,13 +10,23 @@ export const buildOptions = {
  external: ["obsidian", "electron", "@codemirror/autocomplete", "@codemirror/collab", "@codemirror/commands", "@codemirror/language", "@codemirror/lint", "@codemirror/search", "@codemirror/state", "@codemirror/view", "@lezer/common", "@lezer/highlight", "@lezer/lr", ...builtinModules, ...builtinModules.map(m => `node:${m}`)],
  inject: ["src/agent/node-fetch.ts"], outfile: "main.js", sourcemap: production ? false : "inline", minify: production, logLevel: "info",
  plugins: [{
-  name: "undici-global-binding",
+  name: "undici-node-globals",
   setup(build) {
-   // Undici exports an unused install() that assigns globalThis.fetch. Keep that
-   // module's global binding local so lexical fetch injection does not turn the
-   // assignment into an illegal import write. We never invoke install().
-   build.onLoad({ filter: /[/\\]undici[/\\]index\.js$/ }, async ({ path }) => ({
-    contents: `const globalThis = global;\n${await readFile(path, "utf8")}`,
+   // Obsidian's renderer timers lack unref, performance lacks markResourceTiming,
+   // and DOM streams can stall Undici response bodies and cancellation. Bind
+   // only Undici to Node APIs, leaving host/UI globals unchanged. The inner
+   // block preserves modules' own imports; index's globalThis alias prevents
+   // lexical fetch injection rewriting its unused install() assignment.
+   build.onLoad({ filter: /[/\\]undici[/\\].*\.js$/ }, async ({ path }) => ({
+    contents: `"use strict";\n{
+     const { setTimeout, clearTimeout, setInterval, clearInterval, setImmediate, clearImmediate } = require("node:timers");
+     const { performance } = require("node:perf_hooks");
+     const { ReadableStream, WritableStream, TransformStream } = require("node:stream/web");
+     {
+      ${/[/\\]undici[/\\]index\.js$/.test(path) ? "const globalThis = global;" : ""}
+      ${await readFile(path, "utf8")}
+     }
+    }`,
     loader: "js"
    }));
   }

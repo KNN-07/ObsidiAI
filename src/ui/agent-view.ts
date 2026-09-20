@@ -5,12 +5,15 @@ import type { AgentController, TimelineItem } from "../agent/controller";
 import { ConnectionSettingsModal, getConnectionBusy, runConnectionOperation, subscribeConnectionState } from "../settings";
 import type { SettingsHost } from "../settings";
 import { validateVaultPath } from "../vault/paths";
+import type { PermissionMode } from "./approval-modal";
+import { ComposerSuggest, type ComposerChoice, type ComposerTrigger } from "./composer-suggest";
+import { ChatHistoryModal } from "./history-modal";
 
 export const AGENT_VIEW_TYPE = "obsidiai-agent";
 export interface AgentViewHost extends SettingsHost {
  controller: AgentController | null;
  disabledReason: string;
- skillChoices(): Promise<{ name: string; description: string; diagnostic?: boolean }[]>;
+ skillChoices(): Promise<{ name: string; description: string; diagnostic?: boolean; userInvocable?: boolean }[]>;
  viewClosed(closingLeaf: WorkspaceLeaf): void;
 }
 class ChoiceModal<T> extends FuzzySuggestModal<T> {
@@ -21,6 +24,14 @@ class ChoiceModal<T> extends FuzzySuggestModal<T> {
 }
 const THINKING_LABELS: Record<ModelThinkingLevel, string> = {
  off: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum",
+};
+const PERMISSION_LABELS: Record<PermissionMode, string> = {
+ "read-only": "Read-only", ask: "Ask before changes", "auto-approve-notes": "Auto-approve notes",
+};
+const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
+ "read-only": "Inspect context without changing notes or plugins.",
+ ask: "Review each note or plugin change before it runs.",
+ "auto-approve-notes": "Note edits and creation run without approval. Plugin changes still require approval.",
 };
 interface RenderedMessage {
  el: HTMLElement;
@@ -79,12 +90,22 @@ export class AgentView extends ItemView {
  private modelLabel?: HTMLElement;
  private thinkingButton?: ButtonComponent;
  private thinkingLabel?: HTMLElement;
+ private permissionButton?: ButtonComponent;
+ private permissionLabel?: HTMLElement;
+ private disclosure?: HTMLElement;
  private modelProbe?: AbortController;
- private selectionModal?: FuzzySuggestModal<Model<Api>> | FuzzySuggestModal<ModelThinkingLevel>;
+ private selectionModal?: FuzzySuggestModal<Model<Api>> | FuzzySuggestModal<ModelThinkingLevel> | FuzzySuggestModal<PermissionMode>;
  private sendButton?: ButtonComponent;
  private stopButton?: ButtonComponent;
  private newButton?: ButtonComponent;
  private jump?: ButtonComponent;
+ private historyButton?: ButtonComponent;
+ private historyModal?: ChatHistoryModal;
+ private composerSuggest?: ComposerSuggest;
+ private contextModal?: { close(): void };
+ private attachmentEpoch = 0;
+ private attachmentPending = false;
+ private attachmentStatus?: HTMLElement;
  private readonly rendered = new Map<string, RenderedMessage>();
  private readonly draftChips = new Map<string, HTMLButtonElement>();
  constructor(leaf: WorkspaceLeaf, private readonly host: AgentViewHost) { super(leaf); }
@@ -113,10 +134,16 @@ export class AgentView extends ItemView {
   const controller = this.host.controller;
   if (controller) {
    this.newButton = this.iconButton(headerActions, "New conversation", "square-pen", () => {
+    this.attachmentEpoch++; this.composerSuggest?.dismiss();
     void controller.reset().then(() => {
      if (!this.textarea || this.closed) return;
-     this.textarea.value = ""; this.resizeComposer(); this.textarea.focus(); this.schedule();
-    });
+     this.textarea.value = ""; this.attachmentStatus?.empty(); this.resizeComposer(); this.textarea.focus(); this.schedule();
+    }).catch(error => { if (!this.closed) new Notice(error instanceof Error ? error.message : "Could not start a new conversation. Your current chat is retained."); });
+   });
+   this.historyButton = this.iconButton(headerActions, "Conversation history", "history", () => {
+    if (!controller.idle || this.attachmentPending) return;
+    this.attachmentEpoch++; this.composerSuggest?.dismiss();
+    this.historyModal = new ChatHistoryModal(this.app, controller); this.historyModal.open();
    });
   }
   this.iconButton(headerActions, "Settings", "settings-2", () => new ConnectionSettingsModal(this.app, this.host).open());
@@ -171,9 +198,11 @@ export class AgentView extends ItemView {
   this.chips = composer.createDiv({ cls: "obsidiai-chips", attr: { "aria-label": "Draft context" } });
   this.textarea = composer.createEl("textarea", { cls: "obsidiai-composer", attr: { placeholder: "Ask anything about your vault…", "aria-label": "Message", rows: "2" } });
   this.registerDomEvent(this.textarea, "input", () => { this.resizeComposer(); this.schedule(); });
-  this.registerDomEvent(this.textarea, "keydown", event => {
-   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void this.send(); }
-  });
+  this.composerSuggest = new ComposerSuggest(this.textarea, composer, trigger => this.contextChoices(trigger),
+   choice => { if (choice.kind !== "skill") void this.attachTarget(choice); },
+   () => { void this.send(); }, () => !this.closed && controller.idle && !this.attachmentPending,
+   () => { this.resizeComposer(); this.schedule(); });
+  this.attachmentStatus = composer.createDiv({ cls: "obsidiai-attachment-status", attr: { role: "status", "aria-live": "polite" } });
   const actions = composer.createDiv({ cls: "obsidiai-composer-actions" });
   const contextActions = actions.createDiv({ cls: "obsidiai-context-actions" });
   this.iconButton(contextActions, "Attach note", "paperclip", () => this.attachNote());
@@ -190,12 +219,16 @@ export class AgentView extends ItemView {
   this.thinkingButton.buttonEl.addClass("obsidiai-thinking-button");
   setIcon(this.thinkingButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "brain");
   this.thinkingLabel = this.thinkingButton.buttonEl.createSpan();
+  this.permissionButton = new ButtonComponent(modelActions).onClick(() => this.choosePermissions());
+  this.permissionButton.buttonEl.addClass("obsidiai-text-button", "obsidiai-permission-button");
+  setIcon(this.permissionButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "shield-check");
+  this.permissionLabel = this.permissionButton.buttonEl.createSpan();
   this.sendButton = this.iconButton(modelActions, "Send message", "arrow-up", () => { void this.send(); });
   this.sendButton.buttonEl.addClass("obsidiai-send");
   this.stopButton = this.iconButton(modelActions, "Stop generation", "square", () => { void controller.stop(); });
   this.stopButton.buttonEl.addClass("obsidiai-stop");
-  composeRegion.createEl("p", { cls: "obsidiai-disclosure", text: "The agent may read notes, metadata, graph links, skills, and non-secret plugin manifests and send context to your provider. Note and plugin changes need approval; plugin changes can run third-party code." });
-  composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Conversations stay in memory · Enter to send · Shift + Enter for a new line" });
+  this.disclosure = composeRegion.createEl("p", { cls: "obsidiai-disclosure" });
+  composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Chats saved in the vault’s plugin folder · @ notes or folders · / skills · Enter to send · Shift + Enter for a new line" });
 
   this.unsubscribe = controller.subscribe(() => this.schedule());
   this.hostUnsubscribe = this.host.subscribe(() => this.schedule());
@@ -214,10 +247,15 @@ export class AgentView extends ItemView {
 
  async chooseSkill(): Promise<void> {
   try {
-   const choices = await this.host.skillChoices();
-   if (this.closed) return;
+   const epoch = this.attachmentEpoch;
+   const choices = (await this.host.skillChoices()).filter(s => s.userInvocable !== false);
+   if (this.closed || epoch !== this.attachmentEpoch || !this.host.controller?.idle) return;
    if (!choices.length) { new Notice(this.host.skillsStatus()); return; }
-   new ChoiceModal(this.app, choices, s => `${s.diagnostic ? "Diagnostic: " : ""}${s.name} — ${s.description}`, s => { if (s.diagnostic) new Notice(`${s.name}: ${s.description}`); else this.host.controller?.selectSkill(s.name); }).open();
+   const picker = new ChoiceModal(this.app, choices, s => `${s.diagnostic ? "Diagnostic: " : ""}${s.name} — ${s.description}`, s => {
+    if (this.closed || epoch !== this.attachmentEpoch || !this.host.controller?.idle) return;
+    if (s.diagnostic) new Notice(`${s.name}: ${s.description}`); else this.host.controller.selectSkill(s.name);
+   });
+   this.contextModal = picker; picker.open();
   } catch { new Notice("Could not read skills. Review skill-folder diagnostics in Settings."); }
  }
  private async chooseModel(): Promise<void> {
@@ -277,20 +315,81 @@ export class AgentView extends ItemView {
   picker.setPlaceholder("Thinking effort · higher levels may use more tokens and time");
   this.selectionModal = picker; picker.open();
  }
+ private choosePermissions(): void {
+  const controller = this.host.controller;
+  if (!controller?.idle || getConnectionBusy(this.host)) return;
+  const modes: PermissionMode[] = ["read-only", "ask", "auto-approve-notes"];
+  const picker = new ChoiceModal<PermissionMode>(this.app, modes, mode => `${PERMISSION_LABELS[mode]}${mode === controller.permissionMode ? " — selected" : ""} · ${PERMISSION_DESCRIPTIONS[mode]}`, mode => {
+   if (this.closed || !controller.idle || getConnectionBusy(this.host)) return;
+   controller.setPermissionMode(mode);
+  });
+  picker.setPlaceholder("Permissions · resets to Ask before changes for each new conversation");
+  this.selectionModal = picker; picker.open();
+ }
+ private permittedNotes(): TFile[] {
+  return this.app.vault.getMarkdownFiles().filter(file => { try { validateVaultPath(file.path, this.app.vault.configDir); return true; } catch { return false; } });
+ }
+ private async contextChoices(trigger: ComposerTrigger): Promise<ComposerChoice[]> {
+  const query = trigger.query.toLocaleLowerCase();
+  if (trigger.kind === "skill") return (await this.host.skillChoices())
+   .filter(s => !s.diagnostic && s.userInvocable !== false && s.name.toLocaleLowerCase().includes(query))
+   .map(s => ({ kind: "skill", value: s.name, detail: s.description }));
+  const files = this.permittedNotes(), folders = new Map<string, number>();
+  for (const file of files) {
+   const parts = file.path.split("/"); parts.pop();
+   while (parts.length) { const path = parts.join("/"); folders.set(path, (folders.get(path) ?? 0) + 1); parts.pop(); }
+  }
+  const choices: ComposerChoice[] = files.map(file => ({ kind: "file", value: file.path, detail: "Attach note snapshot" }));
+  for (const [path, count] of folders) choices.push({ kind: "folder", value: path, detail: `Attach ${count} Markdown note${count === 1 ? "" : "s"} in this folder and subfolders` });
+  return choices.filter(choice => choice.value.toLocaleLowerCase().includes(query)).sort((a, b) => a.value.localeCompare(b.value));
+ }
  private attachNote(): void {
-  const files = this.app.vault.getMarkdownFiles().filter(file => { try { validateVaultPath(file.path, this.app.vault.configDir); return true; } catch { return false; } });
-  new ChoiceModal<TFile>(this.app, files, f => f.path, file => {
-   void this.app.vault.read(file).then(content => { if (!this.closed) this.host.controller?.addAttachment(file.path, content); }).catch(error => new Notice(error instanceof Error ? error.message : "Could not attach note."));
-  }).open();
+  if (this.closed || !this.host.controller?.idle || this.attachmentPending) return;
+  const epoch = this.attachmentEpoch;
+  const picker = new ChoiceModal<TFile>(this.app, this.permittedNotes(), f => f.path, file => {
+   if (!this.closed && epoch === this.attachmentEpoch) void this.attachTarget({ kind: "file", value: file.path, detail: "" });
+  });
+  this.contextModal = picker; picker.open();
+ }
+ private async attachTarget(choice: ComposerChoice): Promise<void> {
+  const controller = this.host.controller;
+  if (this.closed || !controller?.idle || this.attachmentPending) return;
+  const epoch = this.attachmentEpoch;
+  const files = this.permittedNotes().filter(file => choice.kind === "folder" ? file.path.startsWith(`${choice.value}/`) : file.path === choice.value);
+  this.attachmentPending = true; this.schedule();
+  const failures: string[] = [];
+  let attached = 0, duplicate = 0;
+  this.attachmentStatus?.setText(`Attaching ${choice.value}${choice.kind === "folder" ? "/" : ""} · ${files.length} notes…`);
+  try {
+   for (const file of files) {
+    if (this.closed || epoch !== this.attachmentEpoch || !controller.idle) return;
+    if (controller.attachments.some(a => a.path === file.path)) { duplicate++; continue; }
+    const path = file.path;
+    try {
+     const content = await this.app.vault.read(file);
+     if (this.closed || epoch !== this.attachmentEpoch || !controller.idle) return;
+     if (file.path !== path || this.app.vault.getFileByPath(path) !== file) throw new Error("Note moved or removed");
+     validateVaultPath(path, this.app.vault.configDir);
+     if (controller.attachments.some(a => a.path === path)) { duplicate++; continue; }
+     controller.addAttachment(path, content); attached++;
+    } catch { failures.push(path); }
+   }
+   if (!this.closed && epoch === this.attachmentEpoch) {
+    const summary = `${choice.value}${choice.kind === "folder" ? "/" : ""}: ${attached} attached${duplicate ? `, ${duplicate} already attached` : ""}${!files.length ? "; no eligible notes remain" : ""}${failures.length ? `. Could not attach ${failures.length} (unreadable, changed, or over 200,000 characters): ${failures.join(", ")}` : ""}`;
+    this.attachmentStatus?.setText(summary);
+    if (failures.length || !files.length) new Notice(summary, 10000);
+   }
+  } finally { this.attachmentPending = false; this.schedule(); }
  }
  private async send(): Promise<void> {
   const controller = this.host.controller;
-  if (!controller || !this.textarea || !controller.idle || (!this.textarea.value.trim() && !controller.selectedSkills.size)) return;
+  if (!controller || !this.textarea || !controller.idle || this.attachmentPending || (!this.textarea.value.trim() && !controller.selectedSkills.size)) return;
   if (getConnectionBusy(this.host)) { new Notice("Wait for the connection operation to finish."); return; }
   const draft = this.textarea.value;
+  this.attachmentEpoch++; this.composerSuggest?.dismiss(); this.contextModal?.close();
   try {
    await controller.send(draft, () => {
-    if (this.textarea?.value === draft && !this.closed) { this.textarea.value = ""; this.resizeComposer(); }
+    if (this.textarea?.value === draft && !this.closed) { this.textarea.value = ""; this.attachmentStatus?.empty(); this.resizeComposer(); }
     this.followLatest = true;
    });
   } catch (error) { new Notice(error instanceof Error && error.name !== "AbortError" ? error.message : "Stopped before submission."); }
@@ -333,8 +432,16 @@ export class AgentView extends ItemView {
   this.thinkingButton!.setDisabled(!controller.idle || !controller.ready || busy || controller.thinkingLevels.length < 2)
    .setTooltip(controller.ready && controller.thinkingLevels.length < 2 ? `This model has fixed thinking effort: ${thinking}` : `Thinking effort: ${thinking}. Higher levels may use more tokens and time.`);
   this.thinkingButton!.buttonEl.setAttr("aria-label", `Thinking effort: ${thinking}`);
-  this.newButton!.setDisabled(!controller.idle);
-  this.sendButton!.setDisabled(!controller.idle || !controller.ready || busy || (!this.textarea!.value.trim() && !controller.selectedSkills.size));
+  const permission = PERMISSION_LABELS[controller.permissionMode];
+  this.permissionLabel!.setText(permission);
+  this.permissionButton!.setDisabled(!controller.idle || busy).setTooltip(`${PERMISSION_DESCRIPTIONS[controller.permissionMode]} New conversations reset to Ask before changes.`);
+  this.permissionButton!.buttonEl.setAttr("aria-label", `Permissions: ${permission}`);
+  this.permissionButton!.buttonEl.setAttr("data-mode", controller.permissionMode);
+  this.disclosure!.setText(`The agent may read notes, metadata, graph links, skills, and non-secret plugin manifests and send context to your provider. ${PERMISSION_DESCRIPTIONS[controller.permissionMode]} Plugin changes can run third-party code. ${controller.historyMessage}`);
+  this.newButton!.setDisabled(!controller.idle || this.attachmentPending);
+  this.historyButton!.setDisabled(!controller.idle || this.attachmentPending);
+  this.sendButton!.setDisabled(!controller.idle || !controller.ready || busy || this.attachmentPending || (!this.textarea!.value.trim() && !controller.selectedSkills.size));
+  if (!controller.idle) this.composerSuggest?.dismiss();
   this.sendButton!.buttonEl.hidden = !controller.idle;
   this.stopButton!.buttonEl.hidden = controller.idle;
   this.stopButton!.setDisabled(controller.state === "stopping");
@@ -450,6 +557,7 @@ export class AgentView extends ItemView {
  }
  private release(): void {
   this.closed = true;
+  this.attachmentEpoch++; this.composerSuggest?.dispose(); this.contextModal?.close(); this.historyModal?.close();
   this.modelProbe?.abort(); this.selectionModal?.close();
   this.unsubscribe?.(); this.hostUnsubscribe?.(); this.connectionUnsubscribe?.();
   this.resizeObserver?.disconnect();

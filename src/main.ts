@@ -9,6 +9,7 @@ import type { SkillCatalog } from "./skills/catalog";
 import type { MetadataService } from "./agent/metadata-tools";
 import type { PluginLifecycleService } from "./agent/plugin-tools";
 import type { ApprovalController } from "./ui/approval-modal";
+import { HistoryStore } from "./agent/history";
 
 export function supportedNode(version: string): boolean {
  const [major = 0, minor = 0, patch = 0] = version.split(".").map(Number);
@@ -49,7 +50,10 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
     this.catalog = new SkillCatalog(this.app, () => this.settings.skillsFolder, this);
     const skills = new SkillToolService(this.catalog);
     this.lifecycle = new PluginLifecycleService(this.app, this.manifest.id, this.approvals);
-    this.controller = new AgentController(this.runtime, { notes, metadata: this.metadata, skills, plugins: this.lifecycle, approvals: this.approvals });
+    const history = new HistoryStore(this.app.vault.adapter, `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/history.json`);
+    this.controller = new AgentController(this.runtime, { notes, metadata: this.metadata, skills, plugins: this.lifecycle, approvals: this.approvals }, history);
+    try { await history.list(); }
+    catch { this.controller.historyMessage = "Chat history could not be read. Check plugin-folder access and history.json. Chat remains available, but saving may fail."; new Notice(this.controller.historyMessage); }
     this.register(this.controller.subscribe(() => { for (const listener of this.listeners) listener(); }));
     await this.connectionChanged();
    } catch { this.disabledReason = "ObsidiAI could not initialize its desktop runtime. Review connection settings and restart the plugin."; new Notice(this.disabledReason); }
@@ -75,10 +79,10 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
  async connectionChanged(): Promise<void> { await this.controller?.configure(this.settings.providerId, this.settings.modelId, this.settings.thinkingLevel); for (const listener of this.listeners) listener(); }
  skillsStatus(): string { return this.catalog ? this.catalog.diagnostics.map(d => typeof d === "string" ? d : JSON.stringify(d)).join("\n") || `${this.catalog.entries.length} skills found in ${this.settings.skillsFolder}.` : "Skills are unavailable until the desktop runtime starts."; }
  async refreshSkills(): Promise<void> { await this.catalog?.refresh(true); for (const listener of this.listeners) listener(); }
- async skillChoices(): Promise<{ name: string; description: string; diagnostic?: boolean }[]> {
+ async skillChoices(): Promise<{ name: string; description: string; diagnostic?: boolean; userInvocable?: boolean }[]> {
   await this.catalog?.refresh();
   return this.catalog ? [
-   ...this.catalog.entries.map(s => ({ name: s.name, description: `${s.manualOnly ? "(manual only) " : ""}${s.description}` })),
+   ...this.catalog.entries.map(s => ({ name: s.name, description: `${s.manualOnly ? "(manual only) " : ""}${s.description}`, userInvocable: s.userInvocable })),
    ...this.catalog.diagnostics.map(d => ({ name: d.path, description: d.message, diagnostic: true }))
   ] : [];
  }
@@ -101,7 +105,7 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
  onunload(): void {
   this.disposed = true; AuthModal.cancelAll(); ConnectionSettingsModal.cancelAll(); disposeProviderSettings(this); this.approvals?.cancelAll(); this.metadata?.dispose(); this.lifecycle?.dispose();
   this.catalog?.dispose();
-  void this.controller?.dispose().finally(() => this.credentials?.dispose()); this.listeners.clear();
+  void this.controller?.dispose().catch(() => { new Notice("Chat history could not be saved while unloading. The latest conversation may not be stored."); }).finally(() => this.credentials?.dispose()); this.listeners.clear();
   if (!this.controller) this.credentials?.dispose();
  }
 }

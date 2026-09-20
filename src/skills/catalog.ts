@@ -8,6 +8,7 @@ export interface SkillEntry {
   readonly path: string;
   readonly basePath: string;
   readonly manualOnly: boolean;
+  readonly userInvocable: boolean;
   readonly license?: string;
   readonly compatibility?: string;
   readonly metadata?: Readonly<Record<string, string>>;
@@ -91,6 +92,7 @@ export class SkillCatalog {
           if (typeof name !== "string" || name.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("Invalid skill name: use 1–64 lowercase letters, digits, and single separating hyphens.");
           if (typeof description !== "string" || !description.trim() || description.length > 1024) throw new Error("Skill description must contain 1–1,024 characters.");
           if (Object.hasOwn(fields, "disable-model-invocation") && typeof fields["disable-model-invocation"] !== "boolean") throw new Error("disable-model-invocation must be boolean.");
+          if (Object.hasOwn(fields, "user-invocable") && typeof fields["user-invocable"] !== "boolean") throw new Error("user-invocable must be boolean.");
           const optional: { -readonly [K in "license" | "compatibility" | "metadata" | "allowedTools"]?: SkillEntry[K] } = {};
           for (const key of ["license", "compatibility"] as const) {
             if (Object.hasOwn(fields, key)) {
@@ -107,7 +109,7 @@ export class SkillCatalog {
             if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || Object.values(metadata).some(value => typeof value !== "string")) throw new Error("Skill metadata must map keys to text values.");
             optional.metadata = Object.freeze(Object.fromEntries(Object.entries(metadata).filter(([key]) => !["__proto__", "constructor", "prototype"].includes(key)))) as Readonly<Record<string, string>>;
           }
-          const entry = Object.freeze({ name, description, path: file.path, basePath: file.path.slice(0, -"/SKILL.md".length), manualOnly: fields["disable-model-invocation"] === true, ...optional });
+          const entry = Object.freeze({ name, description, path: file.path, basePath: file.path.slice(0, -"/SKILL.md".length), manualOnly: fields["disable-model-invocation"] === true, userInvocable: fields["user-invocable"] !== false, ...optional });
           const record = { entry, file, source, body: source.slice(info.contentStart) };
           const group = candidates.get(name) ?? [];
           group.push(record);

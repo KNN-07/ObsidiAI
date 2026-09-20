@@ -61,6 +61,8 @@
 .obsidiai-text-button svg, .obsidiai-thinking-button svg { width: 14px; height: 14px; }
 .obsidiai-thinking-button { flex-shrink: 0; white-space: nowrap; }
 .obsidiai-thinking-button:disabled { opacity: .55; }
+.obsidiai-permission-button { flex-shrink: 0; white-space: nowrap; }
+.obsidiai-agent button.obsidiai-permission-button[data-mode="auto-approve-notes"] { color: var(--text-warning); }
 .obsidiai-model-button > span:first-child { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obsidiai-model-button > span:last-child { flex-shrink: 0; }
 .obsidiai-model-button svg { width: 13px; height: 13px; }
@@ -136,7 +138,11 @@
  .obsidiai-suggestion-detail { display: none; }
  .obsidiai-composer-card { padding: 12px 10px 8px; border-radius: 14px; }
  .obsidiai-composer-actions { flex-wrap: wrap; gap: 4px; }
- .obsidiai-model-actions { flex-basis: 100%; }
+ .obsidiai-model-actions { flex-basis: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+ .obsidiai-model-button { grid-column: 1; grid-row: 1; }
+ .obsidiai-thinking-button { grid-column: 2; grid-row: 1; }
+ .obsidiai-send, .obsidiai-stop { grid-column: 3; grid-row: 1; }
+ .obsidiai-permission-button { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
  .obsidiai-agent button.obsidiai-model-button { flex: 1; justify-content: flex-start; padding-inline: 4px; font-size: 11px; }
  .obsidiai-agent button.obsidiai-thinking-button { padding-inline: 5px; font-size: 11px; }
  .obsidiai-disclosure { font-size: 10px; }
@@ -159,3 +165,17 @@
 .obsidiai-note-diff pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: var(--size-4-1); }
 .obsidiai-approval-actions, .obsidiai-approval-controls { display: flex; justify-content: flex-end; gap: var(--size-4-2); margin-top: var(--size-4-3); }
 .obsidiai-plugin-warning { border-left: 3px solid var(--text-warning); padding-inline: var(--size-4-3); color: var(--text-warning); }
+.obsidiai-composer-card { position: relative; }
+.obsidiai-composer-suggest { position: absolute; z-index: 10; left: 0; right: 0; bottom: calc(100% + 8px); max-height: min(280px, 35vh); overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 4px; background: var(--background-primary); box-shadow: var(--shadow-s); }
+.obsidiai-composer-option { padding: 8px 10px; border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; cursor: pointer; }
+.obsidiai-composer-option[aria-selected="true"], .obsidiai-composer-option:hover { background: var(--background-modifier-hover); }
+.obsidiai-composer-option-detail { color: var(--text-muted); font-size: 11px; margin-top: 3px; }
+.obsidiai-attachment-status { max-height: 64px; overflow: auto; overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.obsidiai-attachment-status:not(:empty) { margin-bottom: 8px; }
+@keyframes obsidiai-enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+.obsidiai-message, .obsidiai-chip { animation: obsidiai-enter 160ms ease-out both; }
+.obsidiai-agent button, .obsidiai-tool-summary, .obsidiai-tool-status, .obsidiai-status { transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }
+.obsidiai-tool-chevron { transition: transform 140ms ease; }
+@media (prefers-reduced-motion: reduce) {
+ .obsidiai-agent *, .obsidiai-agent *::before, .obsidiai-agent *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

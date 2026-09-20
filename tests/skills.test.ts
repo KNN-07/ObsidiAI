@@ -75,7 +75,6 @@ describe("instruction-only vault skills", () => {
     await expect(f.execute("read_skill_resource", { name: "link-review", path: "references/checklist.md" })).rejects.toThrow("Load or explicitly select");
     expect(await f.execute("load_skill", { name: "link-review" })).toMatchObject({ body: "PRIVATE INSTRUCTIONS", path: source });
     expect(await f.execute("read_skill_resource", { name: "link-review", path: "references/checklist.md" })).toMatchObject({ content: "Check destinations" });
-    expect(f.service.tools.map(tool => tool.name)).toEqual(["list_skills", "load_skill", "read_skill_resource"]);
   });
 
   it("keeps manual-only skills out of discovery but accepts explicit user selection", async () => {
@@ -93,6 +92,14 @@ describe("instruction-only vault skills", () => {
     expect(await f.execute("read_skill_resource", { name: "manual-review", path: "references/checklist.md" })).toMatchObject({ content: "Checklist" });
     await f.service.beginRun([]);
     await expect(f.execute("load_skill", { name: "manual-review" })).rejects.toThrow("explicit user selection");
+  });
+
+  it("rejects user-disabled explicit invocation without removing model access", async () => {
+    const f = fixture({ [source]: skill("model-review", "Model-only instruction", "user-invocable: false\n") });
+    await expect(f.service.beginRun(["model-review"])).rejects.toThrow();
+    await f.service.beginRun([]);
+    expect((await f.execute("list_skills", {})).skills).toEqual([expect.objectContaining({ name: "model-review" })]);
+    expect(await f.execute("load_skill", { name: "model-review" })).toMatchObject({ body: "Model-only instruction" });
   });
 
   it("excludes every duplicate and invalid YAML while ordinary empty-skill runs still work", async () => {

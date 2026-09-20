@@ -2,34 +2,129 @@ import { describe, expect, it, vi } from "vitest";
 import { createModels, Type, type Context, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { AgentController, type ControllerServices } from "../src/agent/controller";
+import type { PermissionMode } from "../src/ui/approval-modal";
+import { HistoryStore, type ConversationHistory } from "../src/agent/history";
 
-function fixture(options: Parameters<typeof fauxProvider>[0] = {}) {
+function fixture(options: Parameters<typeof fauxProvider>[0] = {}, history?: ConversationHistory) {
  const faux = fauxProvider({ tokensPerSecond: 100000, ...options });
  const models = createModels(); models.setProvider(faux.provider);
  let pending: ((value: "approve" | "reject") => void) | undefined;
  let approvalListener: (pending: boolean) => void = () => {};
+ let mode: PermissionMode = "ask";
  let content = "Status: draft";
  const approvalReady = Promise.withResolvers<void>();
  const services: ControllerServices = {
   notes: { beginRun() {}, endRun() {}, tools: [{ name: "approved_edit", label: "Edit", description: "Test approval boundary", parameters: Type.Object({}), executionMode: "sequential", async execute(_id, _args, signal) {
-   const gate = Promise.withResolvers<"approve" | "reject">();
-   pending = gate.resolve; approvalListener(true); approvalReady.resolve();
-   signal?.addEventListener("abort", () => gate.resolve("reject"), { once: true });
-   const decision = await gate.promise;
-   approvalListener(false);
+   let decision: "approve" | "reject";
+   if (signal?.aborted || mode === "read-only") decision = "reject";
+   else if (mode === "auto-approve-notes") decision = "approve";
+   else {
+    const gate = Promise.withResolvers<"approve" | "reject">();
+    pending = gate.resolve; approvalListener(true); approvalReady.resolve();
+    signal?.addEventListener("abort", () => gate.resolve("reject"), { once: true });
+    decision = await gate.promise;
+    pending = undefined; approvalListener(false);
+   }
    const outcome = decision === "approve" && !signal?.aborted ? "applied" : "rejected";
    if (outcome === "applied") content = "Status: reviewed";
    return { content: [{ type: "text", text: outcome }], details: { outcome } };
   } }] },
   metadata: { tools: [] }, plugins: { tools: [] },
   skills: { tools: [], async beginRun(names) { if (names.includes("unknown")) throw new Error("Unknown skill: unknown"); }, endRun() {}, catalogPrompt() { return ""; }, async selectedContext() { return ""; } },
-  approvals: { cancelAll() { pending?.("reject"); }, subscribe(listener) { approvalListener = listener; return () => {}; } }
+  approvals: {
+   get mode() { return mode; },
+   setMode(next) {
+    if (next !== "ask" && next !== "read-only" && next !== "auto-approve-notes") throw new Error("Invalid permission mode.");
+    if (pending) throw new Error("An approval is pending.");
+    mode = next;
+   },
+   cancelAll() { pending?.("reject"); }, subscribe(listener) { approvalListener = listener; return () => {}; }
+  }
  };
- const controller = new AgentController({ models, streamFn: models.streamSimple.bind(models) }, services);
+ const controller = new AgentController({ models, streamFn: models.streamSimple.bind(models) }, services, history);
  return { faux, controller, approvalReady: approvalReady.promise, approve: () => pending?.("approve"), content: () => content, configure: () => controller.configure(faux.provider.id, faux.models[0].id) };
 }
 
 describe("real Agent conversation settlement", () => {
+ it("restores real tool context across reload and deletes without resurrecting on disposal", async () => {
+  let bytes = "";
+  const adapter = { async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path: string, value: string) { bytes = value; } };
+  const first = fixture({}, new HistoryStore(adapter, "history.json")); await first.configure();
+  first.controller.setPermissionMode("auto-approve-notes");
+  first.faux.setResponses([fauxAssistantMessage(fauxToolCall("approved_edit", {})), fauxAssistantMessage("Applied.")]);
+  await first.controller.send("Review it");
+  const [saved] = await first.controller.listHistory();
+  await first.controller.reset();
+  expect(first.controller.timeline).toEqual([]);
+  await first.controller.dispose();
+  const next = fixture({}, new HistoryStore(adapter, "history.json")); await next.configure();
+  await next.controller.openConversation(saved!.id);
+  expect(next.controller.permissionMode).toBe("ask");
+  expect(next.controller.timeline.some(t => t.kind === "tool" && t.status === "applied")).toBe(true);
+  let context: Context | undefined;
+  const stream = next.controller.runtime.streamFn;
+  next.controller.runtime.streamFn = (model, value, options) => { context = value; return stream(model, value, options); };
+  // Reopen binds the capturing stream to a fresh real Agent.
+  await next.controller.openConversation(saved!.id);
+  next.faux.setResponses([fauxAssistantMessage("I remember.")]);
+  await next.controller.send("What changed?");
+  expect(context?.messages.some(m => m.role === "toolResult")).toBe(true);
+  expect(context?.messages.some(m => m.role === "assistant" && m.content.some(c => c.type === "toolCall"))).toBe(true);
+  await next.controller.deleteConversation(saved!.id);
+  await next.controller.dispose();
+  expect(await new HistoryStore(adapter, "history.json").list()).toEqual([]);
+  expect(bytes).not.toContain("Review it");
+  expect(bytes).not.toContain("auto-approve-notes");
+ });
+ it("refuses history switching during approval and archives the cancelled run only after settlement", async () => {
+  let bytes = "";
+  const history = new HistoryStore({ async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path, value) { bytes = value; } }, "history.json");
+  const f = fixture({}, history); await f.configure();
+  f.faux.setResponses([fauxAssistantMessage(fauxToolCall("approved_edit", {}))]);
+  const run = f.controller.send("Pending change"); await f.approvalReady;
+  await expect(f.controller.openConversation("other")).rejects.toThrow("settle");
+  await expect(f.controller.deleteConversation("other")).rejects.toThrow("settle");
+  await f.controller.reset(); await run; f.approve();
+  expect(f.content()).toBe("Status: draft");
+  expect(f.controller.timeline).toEqual([]);
+  const [saved] = await history.list();
+  expect((await history.get(saved!.id)).timeline.some(t => t.kind === "tool" && t.complete)).toBe(true);
+  await f.controller.dispose();
+ });
+ it("retains unsaved context when archiving fails and reports the failure", async () => {
+  let bytes = ""; let fail = true;
+  const history = new HistoryStore({ async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path, value) { if (fail) throw new Error("Disk full"); bytes = value; } }, "history.json");
+  const f = fixture({}, history); await f.configure();
+  f.faux.setResponses([fauxAssistantMessage("Keep this answer.")]);
+  await expect(f.controller.send("Keep this question.")).rejects.toThrow("could not be saved");
+  await expect(f.controller.reset()).rejects.toThrow("could not be saved");
+  expect(f.controller.timeline.some(t => t.text === "Keep this answer.")).toBe(true);
+  expect(f.controller.idle).toBe(true);
+  fail = false; await f.controller.reset();
+  const [saved] = await history.list();
+  await f.controller.openConversation(saved!.id);
+  f.faux.setResponses([(context: Context) => {
+   expect(JSON.stringify(context.messages)).toContain("Keep this question.");
+   expect(JSON.stringify(context.messages)).toContain("Keep this answer.");
+   return fauxAssistantMessage("Recovered context.");
+  }]);
+  await f.controller.send("Continue.");
+  await f.controller.dispose();
+ });
+ it("waits for an in-flight deletion during disposal without writing the deleted chat back", async () => {
+  let bytes = ""; let block = false;
+  const entered = Promise.withResolvers<void>(); const gate = Promise.withResolvers<void>();
+  const history = new HistoryStore({ async exists() { return !!bytes; }, async read() { return bytes; }, async write(_path, value) { if (block) { entered.resolve(); await gate.promise; } bytes = value; } }, "history.json");
+  const f = fixture({}, history); await f.configure();
+  f.faux.setResponses([fauxAssistantMessage("Saved.")]); await f.controller.send("Question");
+  const [saved] = await history.list(); block = true;
+  const deletion = f.controller.deleteConversation(saved!.id); await entered.promise;
+  let disposed = false; const disposal = f.controller.dispose().then(() => { disposed = true; });
+  await Promise.resolve(); expect(disposed).toBe(false);
+  gate.resolve(); await deletion; await disposal;
+  expect(await history.list()).toEqual([]);
+  expect(bytes).not.toContain("Question");
+ });
  it("waits for approval and preserves applied results after settlement", async () => {
   const f = fixture(); await f.configure();
   f.faux.setResponses([fauxAssistantMessage(fauxToolCall("approved_edit", {})), fauxAssistantMessage("Changed after approval.")]);
@@ -53,6 +148,67 @@ describe("real Agent conversation settlement", () => {
   expect(f.content()).toBe("Status: draft"); expect(f.controller.idle).toBe(true);
   f.faux.setResponses([fauxAssistantMessage("Next run works")]); await f.controller.send("Hello");
   expect(f.controller.timeline.some(t => t.text === "Next run works")).toBe(true);
+  await f.controller.dispose();
+ });
+ it("locks permission changes throughout running, approval, stopping, and disposal", async () => {
+  const f = fixture(); await f.configure();
+  f.faux.setResponses([fauxAssistantMessage(fauxToolCall("approved_edit", {}))]);
+  const run = f.controller.send("Review it");
+  expect(() => f.controller.setPermissionMode("auto-approve-notes")).toThrow("Wait for the current run");
+  await f.approvalReady;
+  expect(() => f.controller.setPermissionMode("read-only")).toThrow("Wait for the current run");
+  const stop = f.controller.stop();
+  expect(() => f.controller.setPermissionMode("auto-approve-notes")).toThrow("Wait for the current run");
+  await stop; await run;
+  expect(f.content()).toBe("Status: draft");
+  f.controller.setPermissionMode("read-only");
+  await f.controller.dispose();
+  expect(() => f.controller.setPermissionMode("ask")).toThrow("Wait for the current run");
+ });
+ it("changes note permissions without losing conversation and restores approval on New conversation", async () => {
+  const f = fixture(); await f.configure();
+  const requests: Context["messages"][] = [];
+  const propose = (context: Context) => {
+   requests.push(structuredClone(context.messages));
+   return fauxAssistantMessage(fauxToolCall("approved_edit", {}));
+  };
+  f.faux.setResponses([propose, fauxAssistantMessage("Read-only preserved it"), propose, fauxAssistantMessage("Automatic edit applied")]);
+  f.controller.setPermissionMode("read-only");
+  await f.controller.send("Remember this question");
+  expect(f.content()).toBe("Status: draft");
+  expect(f.controller.timeline.find(item => item.kind === "tool")?.status).toBe("rejected");
+  f.controller.setPermissionMode("auto-approve-notes");
+  await f.configure();
+  await f.controller.send("Now edit it");
+  expect(f.content()).toBe("Status: reviewed");
+  expect(f.controller.timeline.filter(item => item.kind === "tool").map(item => item.status)).toEqual(["rejected", "applied"]);
+  expect(requests[1]!.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : message.content.filter(block => block.type === "text").map(block => block.text).join(""))).toEqual(["Remember this question", "Now edit it"]);
+  await f.controller.reset();
+  expect(f.controller.timeline).toEqual([]);
+  f.faux.setResponses([propose, fauxAssistantMessage("Approved in a new conversation")]);
+  const run = f.controller.send("A fresh conversation");
+  await f.approvalReady;
+  expect(f.controller.state).toBe("awaiting-approval");
+  expect(requests[2]!.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content : message.content.filter(block => block.type === "text").map(block => block.text).join(""))).toEqual(["A fresh conversation"]);
+  f.approve(); await run;
+  await f.controller.dispose();
+ });
+ it("settles an active run before resetting permission to ask", async () => {
+  const f = fixture(); await f.configure();
+  f.controller.setPermissionMode("auto-approve-notes");
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  f.faux.setResponses([async () => {
+   entered.resolve(); await release.promise; return fauxAssistantMessage("Stopped");
+  }]);
+  const run = f.controller.send("Wait at the provider");
+  await entered.promise;
+  const reset = f.controller.reset();
+  expect(f.controller.permissionMode).toBe("auto-approve-notes");
+  release.resolve(); await reset; await run;
+  expect(f.controller.permissionMode).toBe("ask");
+  expect(f.controller.idle).toBe(true);
+  expect(f.controller.timeline).toEqual([]);
   await f.controller.dispose();
  });
  it("keeps attachments on failed setup or unknown slash skills and clears only upon submission", async () => {
