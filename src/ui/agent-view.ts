@@ -75,10 +75,12 @@ const TOOL_PRESENTATION: Record<string, { label: string; icon: string }> = {
  search_community_plugins: { label: "Finding plugins", icon: "blocks" },
  get_plugin_details: { label: "Plugin details", icon: "blocks" },
  propose_plugin_change: { label: "Plugin change", icon: "shield-alert" },
+ inspect_plugin_settings: { label: "Reviewing plugin settings access", icon: "eye" },
+ propose_plugin_settings_change: { label: "Plugin settings change", icon: "settings-2" },
 };
 const STATUS_LABELS: Record<string, string> = {
  running: "Working", "awaiting-approval": "Needs approval", stopping: "Stopping",
- success: "Done", applied: "Applied", unchanged: "Unchanged", rejected: "Rejected",
+ success: "Done", applied: "Applied", shared: "Shared", unchanged: "Unchanged", rejected: "Rejected",
  cancelled: "Cancelled", aborted: "Stopped", error: "Error", failed: "Failed", conflict: "Conflict",
 };
 
@@ -621,7 +623,7 @@ export class AgentView extends ItemView {
    .setTooltip(this.host.settings.autoAttachOpenNotes ? "Open-note context is on. Visible Markdown tabs are captured at Send, including unsaved edits. Remove a chip to exclude a note for this message." : "Automatically attach open Markdown notes at Send. Their contents go to your provider and saved chat history.");
   this.openNotesButton!.buttonEl.setAttrs({ "aria-pressed": String(this.host.settings.autoAttachOpenNotes), "aria-label": "Automatically attach open notes" });
   this.permissionButton!.buttonEl.setAttr("data-mode", controller.permissionMode);
-  this.disclosure!.setText(`The agent may send notes, metadata, graph links, skills, and non-secret plugin manifests to your provider. Attached text and images are sent on Send and saved in chat history. ${PERMISSION_DESCRIPTIONS[controller.permissionMode]} Plugin changes can run third-party code. ${controller.historyMessage}`);
+  this.disclosure!.setText(`The agent may send notes, metadata, graph links, skills, and non-secret plugin manifests to your provider. Attached text/images and explicitly shared plugin settings are sent to your provider and saved in chat history. ${PERMISSION_DESCRIPTIONS[controller.permissionMode]} Plugin changes can run third-party code. ${controller.historyMessage}`);
   this.newButton!.setDisabled(!controller.idle || this.attachmentPending);
   this.historyButton!.setDisabled(!controller.idle || this.attachmentPending);
   this.sendButton!.setDisabled(!controller.idle || !controller.ready || busy || this.attachmentPending || (!this.textarea!.value.trim() && !controller.selectedSkills.size && !controller.attachments.length));
@@ -756,7 +758,7 @@ export class AgentView extends ItemView {
     context = title.createSpan({ cls: "obsidiai-tool-context" });
     status = summary.createSpan({ cls: "obsidiai-tool-status" });
     setIcon(summary.createSpan({ cls: "obsidiai-tool-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
-    if (item.toolName === "propose_plugin_change") {
+    if (item.toolName === "propose_plugin_change" || item.toolName === "propose_plugin_settings_change") {
      el.addClass("obsidiai-code-warning");
      title.createSpan({ cls: "obsidiai-code-notice", text: "Can run third-party code" });
     }

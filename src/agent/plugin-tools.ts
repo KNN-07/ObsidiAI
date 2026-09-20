@@ -4,6 +4,7 @@ import { Type } from '@earendil-works/pi-ai';
 import type { ApprovalController } from '../ui/approval';
 import { PluginBridge, PluginPolicyError, validatePluginId, type NativeMethod, type PluginAction, type PluginChangeProposal, type PluginObservedState, type PluginRelease } from '../plugins/bridge';
 import { compareVersions, PluginRegistry } from '../plugins/registry';
+import { PluginSettingsService } from '../plugins/settings';
 
 export interface PluginChangeResult {
   outcome: 'applied' | 'unchanged' | 'rejected' | 'cancelled' | 'failed';
@@ -26,10 +27,12 @@ export class PluginLifecycleService {
   readonly tools: AgentTool<any>[];
   readonly bridge: PluginBridge;
   readonly registry = new PluginRegistry();
+  readonly settings: PluginSettingsService;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly lifetime = new AbortController();
   constructor(app: App, private readonly selfId: string, private readonly approval: Pick<ApprovalController, 'request'>) {
     this.bridge = new PluginBridge(app);
+    this.settings = new PluginSettingsService(app, selfId, this.bridge, approval, action => this.enqueue(action), signal => this.signal(signal));
     this.tools = [
       { name: 'list_plugins', label: 'List installed community plugins', description: 'Inspect safe community plugin manifests, configured enabled intent and currently loaded state; no plugin settings or instances.', parameters: Type.Object(pagination), executionMode: 'sequential', execute: async (_id, args: { offset?: number; limit?: number }, signal) => {
         this.signal(signal).throwIfAborted();
@@ -50,14 +53,18 @@ export class PluginLifecycleService {
         if (outcome.outcome === 'failed') throw new PluginPolicyError(JSON.stringify(outcome));
         return result(outcome);
       } },
+      ...this.settings.tools,
     ] as AgentTool<any>[];
   }
   private signal(signal?: AbortSignal): AbortSignal { return signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal; }
-  dispose(): void { this.lifetime.abort(); this.registry.clear(); }
+  dispose(): void { this.lifetime.abort(); this.registry.clear(); this.settings.dispose(); }
   compatibilityStatus() { return this.bridge.compatibilityStatus(); }
   proposeChange(pluginId: string, action: PluginAction, signal: AbortSignal): Promise<PluginChangeResult> {
     const activeSignal = this.signal(signal);
-    const operation = this.queue.then(() => this.perform(pluginId, action, activeSignal));
+    return this.enqueue(() => this.perform(pluginId, action, activeSignal));
+  }
+  private enqueue<T>(action: () => Promise<T>): Promise<T> {
+    const operation = this.queue.then(() => { this.lifetime.signal.throwIfAborted(); return action(); });
     this.queue = operation.catch(() => {});
     return operation;
   }

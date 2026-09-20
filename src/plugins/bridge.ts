@@ -67,6 +67,11 @@ export class PluginBridge {
     const manifest = this.manifest(id);
     return { installed: manifest !== null, version: manifest?.version ?? null, configuredEnabled: manager.enabledPlugins.has(id), loaded: Object.hasOwn(manager.plugins, id) && !!manager.plugins[id] };
   }
+  /** Opaque identity for conflict checks; never expose instances in tool results. */
+  instanceIdentity(id: string): unknown {
+    const plugins = this.state().plugins;
+    return Object.hasOwn(plugins, id) ? plugins[id] : undefined;
+  }
   requireMutation(required: NativeMethod[]): void {
     this.state();
     const manager = this.manager();

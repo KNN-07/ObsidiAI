@@ -1,10 +1,11 @@
 import type { PluginChangeProposal } from '../plugins/bridge';
+import type { PluginSettingsReadProposal, PluginSettingsChangeProposal } from '../plugins/settings-types';
 
 export type NoteProposal = Readonly<{ kind: 'note-change'; operation: 'edit' | 'create'; path: string; before: string; after: string }>;
-export type Proposal = NoteProposal | Readonly<{ kind: 'plugin-change'; change: PluginChangeProposal }>;
+export type Proposal = NoteProposal | Readonly<{ kind: 'plugin-change'; change: PluginChangeProposal }> | PluginSettingsReadProposal | PluginSettingsChangeProposal;
 export type ApprovalDecision = 'approve' | 'reject';
 export type PermissionMode = 'read-only' | 'ask' | 'auto-approve-notes';
-export type PendingApproval = Readonly<{ id: string; proposal: Proposal }>;
+export type PendingApproval = Readonly<{ id: string; proposal: Proposal; signal: AbortSignal }>;
 
 export class ApprovalController {
   private permissionMode: PermissionMode = 'ask';
@@ -30,9 +31,10 @@ export class ApprovalController {
   request(proposal: Proposal, signal?: AbortSignal): Promise<ApprovalDecision> {
     if (signal?.aborted) return Promise.resolve('reject');
     if (this.pending) return Promise.reject(new Error('Another approval is already pending.'));
-    if (this.permissionMode === 'read-only') return Promise.resolve('reject');
+    if (this.permissionMode === 'read-only' && proposal.kind !== 'plugin-settings-read') return Promise.resolve('reject');
     if (this.permissionMode === 'auto-approve-notes' && proposal.kind === 'note-change') return Promise.resolve('approve');
     const { promise, resolve } = Promise.withResolvers<ApprovalDecision>();
+    const lifetime = new AbortController();
     let settled = false;
     const abort = () => settle('reject');
     const settle = (decision: ApprovalDecision) => {
@@ -40,10 +42,14 @@ export class ApprovalController {
       settled = true;
       signal?.removeEventListener('abort', abort);
       this.pending = null;
+      lifetime.abort();
       resolve(signal?.aborted ? 'reject' : decision);
       this.notify();
     };
-    this.pending = { review: Object.freeze({ id: crypto.randomUUID(), proposal: Object.freeze({ ...proposal }) }), settle };
+    const reviewProposal = proposal.kind === 'plugin-settings-read'
+      ? { ...proposal, select: (paths: readonly string[]) => { if (!settled && !signal?.aborted) proposal.select(paths); } }
+      : proposal;
+    this.pending = { review: Object.freeze({ id: crypto.randomUUID(), proposal: Object.freeze({ ...reviewProposal }), signal: lifetime.signal }), settle };
     signal?.addEventListener('abort', abort, { once: true });
     try {
       this.notify();

@@ -261,8 +261,18 @@
 .obsidiai-diff-removed { color: var(--text-error); }
 .obsidiai-note-diff { max-height: 55vh; overflow: auto; }
 .obsidiai-note-diff pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: var(--size-4-1); background: transparent; }
-.obsidiai-approval-controls { display: flex; justify-content: flex-end; gap: var(--size-4-2); margin-top: var(--size-4-3); }
+.obsidiai-approval-controls { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--size-4-2); margin-top: var(--size-4-3); }
 .obsidiai-plugin-warning { border-left: 3px solid var(--text-warning); padding-inline: var(--size-4-3); color: var(--text-warning); }
+.obsidiai-settings-fields { max-height: 44vh; overflow: auto; border: 1px solid var(--background-modifier-border); border-radius: 8px; }
+.obsidiai-settings-field { padding: 10px 12px; }
+.obsidiai-settings-field + .obsidiai-settings-field { border-top: 1px solid var(--background-modifier-border); }
+.obsidiai-settings-field label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-family: var(--font-monospace); font-size: 12px; overflow-wrap: anywhere; }
+.obsidiai-settings-field input { flex-shrink: 0; margin-top: 3px; }
+.obsidiai-settings-field details { margin: 6px 0 0 24px; }
+.obsidiai-settings-field summary { cursor: pointer; color: var(--text-muted); font-size: 11px; }
+.obsidiai-settings-value { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; background: var(--background-secondary); font: 12px/1.6 var(--font-monospace); user-select: text; }
+.obsidiai-settings-selection-status { color: var(--text-muted); font-size: 12px; }
+.obsidiai-settings-selection-status[role="alert"] { color: var(--text-error); }
 .obsidiai-composer-card { position: relative; }
 .obsidiai-composer-suggest { position: absolute; z-index: 10; left: 0; right: 0; bottom: calc(100% + 8px); max-height: min(280px, 35vh); overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 4px; background: var(--background-primary); box-shadow: var(--shadow-s); }
 .obsidiai-composer-option { padding: 8px 10px; border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; cursor: pointer; }

@@ -15,7 +15,7 @@ An AI agent in a native Obsidian tab. Ask questions across your notes, explore t
 
 Powered by [pi](https://github.com/earendil-works/pi), ObsidiAI runs inside the desktop plugin. No separate agent installation, terminal session, or embedded web app.
 
-> **Early preview · Desktop only.** Behavioral tests and isolated bundle checks cover the implementation. The native UI, permissions, quick context, and saved history have been checked in a disposable vault on Obsidian 1.13.7. A real NVIDIA request and cancellation were also verified there; successful OAuth login and actual native plugin-manager lifecycle effects remain unverified. Start in a disposable vault, not your only copy of important notes.
+> **Early preview · Desktop only.** Behavioral tests and isolated bundle checks cover the implementation. The native UI, permissions, quick context, and saved history have been checked in a disposable vault on Obsidian 1.13.7. The source build's reviewed settings writes and restarts were also verified with a harmless local fixture plugin. A real NVIDIA request and cancellation were verified; successful OAuth login and native plugin installation/update/uninstallation remain unverified. Start in a disposable vault, not your only copy of important notes.
 
 ![Native ObsidiAI chat with the notebook logo, compact attached-file label, and completed Markdown response](assets/chat-light.png)
 
@@ -48,6 +48,7 @@ Try prompts like:
 | **Query structured information** | Filter by folder, exact tags, and frontmatter properties; inspect headings, tasks, links, and file metadata. |
 | **Reuse skills** | Keep instruction-only skills in your vault and choose them from the Skills picker or with `/skill:name`. |
 | **Manage community plugins** | Browse the official catalog and propose install, update, enable, disable, or uninstall operations—with separate approval for each change. |
+| **Configure plugin settings** | Choose which saved JSON values to share, then separately review exact changes and any required plugin restart. |
 | **Quickly include context** | Select or drop computer text/image files, paste images, and preview large pasted text as attachments. Use `@` for vault notes/folders, `/` for skills, or **Open notes** for current Markdown tabs. |
 | **Resume and organize conversations** | Search saved chats in the integrated History screen, continue with your current model, or select several chats for confirmed bulk deletion. |
 | **Inspect tool activity** | Expand or collapse tool-call chains and individual results. Pending approvals stay visible outside collapsed groups. |
@@ -66,7 +67,7 @@ The source build uses a Claude-inspired arrangement with restrained, shadcn-styl
 - **Follow a live answer.** Incoming text gently fades into place while earlier text stays stable. The notebook logo and Thinking indicator pulse while streaming; completed Markdown has a brief transition. Reduced-motion preferences disable these effects.
 - **Use any pane width.** The layout adapts to narrow split panes and Obsidian's light/dark themes. Enter sends; Shift+Enter adds a line. Scrolling upward pauses automatic following; **Jump to latest** resumes it.
 
-**0.1.6** adds computer text/image attachments, drag-and-drop, clipboard images, compact large-paste previews, and Ctrl/Cmd-click note navigation in new tabs. It retains integrated History with bulk deletion, file-tree browsing, optional open-note context, collapsible tool chains, inline approvals, and native networking fixes. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
+**0.1.7** adds reviewed community-plugin settings tools: selectively share saved JSON values, approve exact changes, and preserve enabled/session-only/disabled state across required restarts. It retains computer text/image attachments, integrated History with bulk deletion, file-tree browsing, optional open-note context, collapsible tool chains, inline approvals, and native networking fixes. Download the installable ZIP from the [latest release](https://github.com/KNN-07/ObsidiAI/releases/latest).
 
 ## Get started
 
@@ -218,20 +219,35 @@ Selecting a skill adds a removable draft chip. Skill resources are restricted to
 
 ## Privacy and control
 
-- **Context goes to your selected provider.** After you send a prompt, the agent can read permitted notes, metadata, graph data, skills, and non-secret plugin manifests and include returned context in model requests. Attaching a note is not a limit on the other notes it may inspect during that run.
+- **Context goes to your selected provider.** After you send a prompt, the agent can read permitted notes, metadata, graph data, skills, and non-secret plugin manifests and include returned context in model requests. Attaching a note is not a limit on the other notes it may inspect during that run. Other plugins' settings are shared only through an explicit per-value review; approved values become model context and saved history.
 - **No background vault uploads or embeddings.** There is no second persisted search index.
 - **Conversation history is stored in the plugin folder.** Settled transcripts, sent context, and tool results are persisted to `history.json`, not plugin settings. Unsent drafts remain in memory. History can be reopened or deleted through the History screen; see the storage/sync warning above.
-- **Plugin credentials use Obsidian SecretStorage.** Non-secret preferences are saved separately. ObsidiAI does not automatically import pi CLI credentials from `~/.pi/agent/auth.json`; provider-supported ambient environment/profile authentication remains available.
-- **You control note permissions.** Each new conversation defaults to individual approval; Read-only blocks changes, while Auto-approve notes skips only note approval cards. Plugin changes always need individual approval. Edits remain bound to a current-run snapshot and checked for conflicts with both saved notes and open editor buffers.
+- **ObsidiAI provider credentials use Obsidian SecretStorage.** Non-secret preferences are saved separately. ObsidiAI does not automatically import pi CLI credentials from `~/.pi/agent/auth.json`; provider-supported ambient environment/profile authentication remains available. Other plugins may store secrets in their own JSON settings—do not select those values unless you intend to disclose them.
+- **You control permissions.** Each new conversation defaults to individual approval; Read-only blocks mutations but allows explicitly reviewed settings disclosure. Auto-approve notes skips only note approval cards. Plugin lifecycle changes, settings disclosure, and settings writes always need their own approval. Note edits remain bound to a current-run snapshot and checked for conflicts with both saved notes and open editor buffers.
 - **Stop is not undo.** It prevents pending approvals and subsequent work, but an atomic write or native plugin operation already in progress may finish. Applied changes stay applied.
 
 ### Community-plugin safety
 
 Community plugins are **unsandboxed third-party code**. Native installation, updates, and enabling can execute code with Obsidian privileges. A registry listing is not a security audit, and ObsidiAI does not verify downloaded source code or checksums.
 
-Plugin management uses an isolated, private Obsidian API. Unsupported capabilities fail explicitly; there is no direct-filesystem or CLI fallback. New installations target a disabled state, and enabling requires a separate approval. Native uninstall may remove the plugin's files **and saved settings**; no backup is created.
+Plugin lifecycle management uses an isolated, private Obsidian API. Unsupported capabilities fail explicitly; there is no direct-filesystem or CLI fallback for lifecycle operations. New installations target a disabled state, and enabling requires a separate approval. Native uninstall may remove the plugin's files **and saved settings**; no backup is created.
 
 ObsidiAI's approval policy constrains its own tools. It is not a sandbox against other plugins already running in Obsidian.
+
+### Configure another plugin's settings
+
+**Available in 0.1.7.** Ask for a setting change by plugin name or ID. Two tools handle the review:
+
+1. **`inspect_plugin_settings`** opens a local review of saved JSON fields. Nothing is selected automatically. Only the values you select and approve are returned to the model and saved in chat history. You can continue with no values selected when proposing new keys.
+2. **`propose_plugin_settings_change`** uses that review's revision to propose exact JSON-pointer changes. Existing values must have been disclosed; new keys require an existing object parent. Review the before/after diff and restart warning, then choose **Save settings** or **Reject**.
+
+This supports only an installed community plugin's existing `<configDir>/plugins/<plugin-id>/data.json`. It cannot configure core plugins, ObsidiAI itself, or plugins that store settings elsewhere. Missing files must first be created by the target plugin. Arrays are edited as whole values, not individual indexes.
+
+Reviews are bounded to a 256 KiB JSON object and 500 leaf fields; individual JSON values and paths are limited to 16,000 characters, selected-field payloads to 32,000 characters, and each proposal to 20 non-overlapping changes. Oversized values cannot be shared. Unselected data is preserved, though JSON formatting may change.
+
+Changed data, plugin versions, or loaded instances invalidate the review. Writes compare the reviewed bytes inside Obsidian's atomic adapter operation. A loaded plugin is stopped and restarted only under the approved change; session-only loading stays session-only, and disabled plugins remain disabled. If stopping the plugin saves different settings, the patch is refused and prior runtime intent is restored when safe.
+
+**Valid JSON is not a validated plugin configuration.** There is no universal settings schema or guarantee that a saved value takes effect. No backup or automatic rollback is provided. Once mutation starts, approved state restoration finishes even after Stop; failures report saved-data and observed plugin state and may leave partial changes.
 
 ## Development
 
@@ -248,7 +264,9 @@ The implementation uses TypeScript, native Obsidian components, pi Agent/Models,
 
 Verification to date includes deterministic real-Agent tool loops, approval/conflict/cancellation cases, credential serialization, graph/metadata queries, skill restrictions, and plugin lifecycle policy. Isolated bundle checks have exercised incremental local SSE and cancellation through the real OpenAI-compatible and Google adapters, OAuth start/cancel, and host-fetch isolation.
 
-Those checks are **not** proof of native UI behavior, successful remote authentication, or actual native plugin installation/uninstallation. Keep native-host verification separate, use disposable vaults, and never include credentials or private note content in bug reports.
+Native settings verification on Obsidian 1.13.7 used a local scripted model and harmless fixture plugin: selected-only disclosure excluded an unselected token from model requests and history; approved JSON reached the restarted plugin; session-only and disabled states were preserved. Rejection, Stop/stale controls, read-only and auto-note permissions, stale files, unload-time saves, and disclosure limits were also exercised. Approval cards were checked in light and narrow dark layouts.
+
+Mocked tests and isolated bundles do **not** prove native UI behavior. Native fixture checks do not validate arbitrary third-party settings schemas, successful OAuth login, or native installation/update/uninstallation. Use disposable vaults and never include credentials or private note content in bug reports.
 
 ### CI and releases
 
