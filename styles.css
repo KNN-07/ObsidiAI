@@ -1,0 +1,24 @@
+.obsidiai-agent { display: flex; flex-direction: column; gap: var(--size-4-2); height: 100%; padding: var(--size-4-3); }
+.obsidiai-toolbar, .obsidiai-actions, .obsidiai-chips { display: flex; flex-wrap: wrap; gap: var(--size-4-2); align-items: center; }
+.obsidiai-toolbar button:first-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.obsidiai-status { color: var(--text-muted); font-size: var(--font-ui-small); }
+.obsidiai-disclosure { color: var(--text-muted); font-size: var(--font-ui-smaller); margin: 0; }
+.obsidiai-timeline { flex: 1; min-height: 80px; overflow-y: auto; overflow-wrap: anywhere; }
+.obsidiai-message { margin-block: var(--size-4-3); padding: var(--size-4-3); border-radius: var(--radius-m); white-space: pre-wrap; }
+.obsidiai-user { background: var(--background-secondary); }
+.obsidiai-tool { border: 1px solid var(--background-modifier-border); font-family: var(--font-monospace); font-size: var(--font-ui-small); }
+.obsidiai-tool a { display: block; }
+.obsidiai-error { color: var(--text-error); }
+.obsidiai-outcome { font-weight: var(--font-semibold); margin-top: var(--size-4-2); }
+.obsidiai-code-warning { border-left: 3px solid var(--text-warning); }
+.obsidiai-composer { resize: vertical; min-height: 90px; width: 100%; }
+.obsidiai-chips button { font-size: var(--font-ui-smaller); }
+.obsidiai-diff { max-height: 55vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-monospace); }
+.obsidiai-diff-added { background: var(--background-modifier-success); }
+.obsidiai-diff-removed { background: var(--background-modifier-error); }
+.obsidiai-approval-actions { display: flex; justify-content: flex-end; gap: var(--size-4-2); margin-top: var(--size-4-3); }
+.obsidiai-note-diff { max-height: 55vh; overflow: auto; }
+.obsidiai-note-diff pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: var(--size-4-1); }
+.obsidiai-approval-controls { display: flex; justify-content: flex-end; gap: var(--size-4-2); margin-top: var(--size-4-3); }
+.obsidiai-plugin-warning { border-left: 3px solid var(--text-warning); padding-inline: var(--size-4-3); color: var(--text-warning); }
+.obsidiai-tool::before { content: attr(data-status); display: block; font-weight: var(--font-semibold); color: var(--text-muted); margin-bottom: var(--size-4-2); }
