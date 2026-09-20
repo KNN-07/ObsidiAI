@@ -2,6 +2,7 @@
   "name": "obsidiai",
   "version": "0.1.6",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",

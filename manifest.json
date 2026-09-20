@@ -2,7 +2,7 @@
   "id": "obsidiai",
   "name": "ObsidiAI",
   "version": "0.1.6",
-  "author": "ObsidiAI contributors",
+  "author": "KNN-07",
   "description": "A native AI agent tab powered by pi, with approval-based note editing.",
   "minAppVersion": "1.11.4",
   "isDesktopOnly": true

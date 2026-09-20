@@ -266,3 +266,7 @@ The Release workflow reruns the shared CI checks, downloads the tested artifact,
 ## Feedback
 
 Found a problem or have a workflow in mind? [Open an issue](https://github.com/KNN-07/ObsidiAI/issues) with your Obsidian version, platform, steps to reproduce, and a sanitized example. For authentication issues, include the provider and safe error category—not tokens, keys, or raw response bodies.
+
+## License
+
+ObsidiAI is licensed under the [MIT License](LICENSE). Third-party dependencies retain their respective licenses.
