@@ -2,47 +2,32 @@ import { describe, expect, it, vi } from "vitest";
 import { createModels, Type, type Context, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { AgentController, type ControllerServices } from "../src/agent/controller";
-import type { PermissionMode } from "../src/ui/approval-modal";
+import { ApprovalController } from "../src/ui/approval";
 import { HistoryStore, type ConversationHistory } from "../src/agent/history";
 
 function fixture(options: Parameters<typeof fauxProvider>[0] = {}, history?: ConversationHistory) {
  const faux = fauxProvider({ tokensPerSecond: 100000, ...options });
  const models = createModels(); models.setProvider(faux.provider);
- let pending: ((value: "approve" | "reject") => void) | undefined;
- let approvalListener: (pending: boolean) => void = () => {};
- let mode: PermissionMode = "ask";
+ const approvals = new ApprovalController();
+ let lastApprovalId = "";
  let content = "Status: draft";
  const approvalReady = Promise.withResolvers<void>();
+ approvals.subscribe(pending => {
+  if (pending) { lastApprovalId = approvals.current!.id; approvalReady.resolve(); }
+ });
  const services: ControllerServices = {
   notes: { beginRun() {}, endRun() {}, tools: [{ name: "approved_edit", label: "Edit", description: "Test approval boundary", parameters: Type.Object({}), executionMode: "sequential", async execute(_id, _args, signal) {
-   let decision: "approve" | "reject";
-   if (signal?.aborted || mode === "read-only") decision = "reject";
-   else if (mode === "auto-approve-notes") decision = "approve";
-   else {
-    const gate = Promise.withResolvers<"approve" | "reject">();
-    pending = gate.resolve; approvalListener(true); approvalReady.resolve();
-    signal?.addEventListener("abort", () => gate.resolve("reject"), { once: true });
-    decision = await gate.promise;
-    pending = undefined; approvalListener(false);
-   }
+   const decision = await approvals.request({ kind: "note-change", operation: "edit", path: "Alpha.md", before: content, after: "Status: reviewed" }, signal);
    const outcome = decision === "approve" && !signal?.aborted ? "applied" : "rejected";
    if (outcome === "applied") content = "Status: reviewed";
    return { content: [{ type: "text", text: outcome }], details: { outcome } };
   } }] },
   metadata: { tools: [] }, plugins: { tools: [] },
   skills: { tools: [], async beginRun(names) { if (names.includes("unknown")) throw new Error("Unknown skill: unknown"); }, endRun() {}, catalogPrompt() { return ""; }, async selectedContext() { return ""; } },
-  approvals: {
-   get mode() { return mode; },
-   setMode(next) {
-    if (next !== "ask" && next !== "read-only" && next !== "auto-approve-notes") throw new Error("Invalid permission mode.");
-    if (pending) throw new Error("An approval is pending.");
-    mode = next;
-   },
-   cancelAll() { pending?.("reject"); }, subscribe(listener) { approvalListener = listener; return () => {}; }
-  }
+  approvals,
  };
  const controller = new AgentController({ models, streamFn: models.streamSimple.bind(models) }, services, history);
- return { faux, controller, approvalReady: approvalReady.promise, approve: () => pending?.("approve"), content: () => content, configure: () => controller.configure(faux.provider.id, faux.models[0].id) };
+ return { faux, controller, approvalReady: approvalReady.promise, approve: () => approvals.decide(lastApprovalId, "approve"), content: () => content, configure: () => controller.configure(faux.provider.id, faux.models[0].id) };
 }
 
 describe("real Agent conversation settlement", () => {

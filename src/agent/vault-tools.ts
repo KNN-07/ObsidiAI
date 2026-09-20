@@ -2,12 +2,16 @@ import { MarkdownView, TFile, TFolder, type App } from 'obsidian';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { Type } from '@earendil-works/pi-ai';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ApprovalController } from '../ui/approval-modal';
+import type { ApprovalController } from '../ui/approval';
 import { validateVaultPath } from '../vault/paths';
 
 export const MAX_NOTE_CHARACTERS = 200_000;
 const STALE = 'Note changed since review; read it again and request a new approval.';
 interface Snapshot { file: TFile; path: string; content: string }
+interface TreeFrame { folder: TFolder; path: string; index: number; childCount: number; level: number }
+interface TreePage { path: string; depth: number; frames: TreeFrame[] }
+const TREE_SCAN_LIMIT = 1_000;
+const TREE_CURSOR_LIMIT = 32;
 function checkAbort(signal?: AbortSignal): void { if (signal?.aborted) throw new Error('Operation cancelled.'); }
 function bounded(content: string): void {
   if (content.length > MAX_NOTE_CHARACTERS) throw new Error('Note content exceeds the 200,000-character limit.');
@@ -17,13 +21,23 @@ function result(data: Record<string, unknown>) { return { content: [{ type: 'tex
 export class VaultToolService {
   readonly tools: AgentTool<any>[];
   private readonly snapshots = new Map<string, Snapshot>();
+  private readonly treePages = new Map<string, TreePage>();
   private run = 0;
   constructor(private readonly app: App, private readonly approval: ApprovalController) {
     const searchSchema = Type.Object({ query: Type.String(), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })) });
     const readSchema = Type.Object({ path: Type.String() });
     const editSchema = Type.Object({ path: Type.String(), oldText: Type.String({ minLength: 1 }), newText: Type.String() });
     const createSchema = Type.Object({ path: Type.String(), content: Type.String({ maxLength: MAX_NOTE_CHARACTERS }) });
+    const listSchema = Type.Object({
+      path: Type.Optional(Type.String()),
+      depth: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+      cursor: Type.Optional(Type.String()),
+    });
     this.tools = [
+      { name: 'list_files', label: 'List vault files', description: 'Inspect visible vault folders (including empty ones) and file paths/types without reading bodies. Defaults to root, depth 1. Follow nextCursor with the same path/depth, including after empty pages. Native child-order traversal is stable while the tree is unchanged; query folders directly to explore beyond depth 3.',
+        executionMode: 'sequential', parameters: listSchema,
+        execute: async (_id, params, signal) => this.listFiles(params.path ?? '', params.depth ?? 1, params.limit ?? 50, params.cursor, signal) } satisfies AgentTool<typeof listSchema>,
       { name: 'search_notes', label: 'Search notes', description: 'Literal case-insensitive search of visible Markdown paths and bounded note bodies.', executionMode: 'sequential',
         parameters: searchSchema,
         execute: async (_id, params, signal) => this.search(params.query, params.limit ?? 20, signal) } satisfies AgentTool<typeof searchSchema>,
@@ -49,8 +63,8 @@ export class VaultToolService {
         execute: async (_id, params, signal) => this.create(params.path, params.content, signal) } satisfies AgentTool<typeof createSchema>,
     ] as AgentTool<any>[];
   }
-  beginRun(): void { this.run++; this.snapshots.clear(); }
-  endRun(): void { this.run++; this.snapshots.clear(); }
+  beginRun(): void { this.run++; this.snapshots.clear(); this.treePages.clear(); }
+  endRun(): void { this.run++; this.snapshots.clear(); this.treePages.clear(); }
   private notePath(path: string): string {
     validateVaultPath(path, this.app.vault.configDir);
     if (!path.toLowerCase().endsWith('.md')) throw new Error('Only Markdown (.md) notes are allowed.');
@@ -66,6 +80,61 @@ export class VaultToolService {
     const slash = path.lastIndexOf('/');
     const parent = slash < 0 ? this.app.vault.getRoot() : this.app.vault.getAbstractFileByPath(path.slice(0, slash));
     if (!(parent instanceof TFolder)) throw new Error('The parent folder must already exist.');
+  }
+  private async listFiles(path: string, depth: number, limit: number, cursor?: string, signal?: AbortSignal) {
+    checkAbort(signal);
+    if (!Number.isInteger(depth) || depth < 1 || depth > 3) throw new Error('File tree depth must be between 1 and 3.');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('File tree limit must be between 1 and 200.');
+    if (path !== '') validateVaultPath(path, this.app.vault.configDir);
+    const root = path === '' ? this.app.vault.getRoot() : this.app.vault.getAbstractFileByPath(path);
+    if (!(root instanceof TFolder)) throw new Error('File tree path must be an existing visible folder.');
+    const previous = cursor === undefined ? undefined : this.treePages.get(cursor);
+    if (cursor !== undefined && !previous) throw new Error('File tree cursor expired; start this folder listing again.');
+    if (previous && (previous.path !== path || previous.depth !== depth)) throw new Error('Use the same path and depth when continuing a file tree listing.');
+    const frame = (folder: TFolder, level: number): TreeFrame => ({ folder, path: folder.path, index: 0, childCount: folder.children.length, level });
+    // Never sort/copy an entire children array: a vault root can contain arbitrarily many files.
+    const frames = previous ? previous.frames.map(value => ({ ...value })) : [frame(root, 0)];
+    const entries: { path: string; type: 'file' | 'folder'; extension?: string }[] = [];
+    let inspected = 0;
+    let depthLimitReached = false;
+    const run = this.run;
+    while (frames.length) {
+      if (inspected % 50 === 0) await delay(0);
+      checkAbort(signal);
+      if (run !== this.run) throw new Error('File tree listing cancelled; start it again.');
+      const current = frames[frames.length - 1]!;
+      const resolved = current.level === 0 && path === '' ? this.app.vault.getRoot() : this.app.vault.getAbstractFileByPath(current.path);
+      if (current.folder.path !== current.path || resolved !== current.folder || current.folder.children.length !== current.childCount) {
+        throw new Error('Vault tree changed during listing; start this folder listing again.');
+      }
+      if (current.index === current.childCount) { frames.pop(); continue; }
+      if (entries.length === limit || inspected === TREE_SCAN_LIMIT) break;
+      const child = current.folder.children[current.index++];
+      inspected++;
+      if (!(child instanceof TFile || child instanceof TFolder)) continue;
+      try { validateVaultPath(child.path, this.app.vault.configDir); } catch { continue; }
+      if (child instanceof TFolder) {
+        entries.push({ path: child.path, type: 'folder' });
+        if (current.level + 1 < depth) frames.push(frame(child, current.level + 1));
+        else depthLimitReached = true;
+      } else {
+        entries.push({ path: child.path, type: 'file', extension: child.extension });
+      }
+    }
+    checkAbort(signal);
+    if (run !== this.run) throw new Error('File tree listing cancelled; start it again.');
+    if (cursor !== undefined) this.treePages.delete(cursor);
+    let nextCursor: string | null = null;
+    if (frames.length) {
+      nextCursor = crypto.randomUUID();
+      if (this.treePages.size >= TREE_CURSOR_LIMIT) this.treePages.delete(this.treePages.keys().next().value!);
+      this.treePages.set(nextCursor, { path, depth, frames });
+    }
+    return result({
+      path, root: path === '', depth, limit, entries, truncated: nextCursor !== null, nextCursor,
+      depthLimitReached,
+      scope: 'Visible files and folders only, in native child order. Pagination covers the requested depth only; query a folder directly for deeper children. Live tree: restart after vault changes. Cursors are single-use and expire when the run ends.',
+    });
   }
   private async search(query: string, limit: number, signal?: AbortSignal) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error('Search limit must be between 1 and 50.');

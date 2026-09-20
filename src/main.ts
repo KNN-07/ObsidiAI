@@ -1,4 +1,4 @@
-import { addIcon, Notice, Plugin, type WorkspaceLeaf } from "obsidian";
+import { addIcon, MarkdownView, Notice, Plugin, type WorkspaceLeaf } from "obsidian";
 import { AgentView, AGENT_VIEW_TYPE, type AgentViewHost } from "./ui/agent-view";
 import { AuthModal } from "./ui/auth-modal";
 import { loadSettings, ObsidiAISettingTab, ConnectionSettingsModal, disposeProviderSettings, type ObsidiAISettings } from "./settings";
@@ -8,9 +8,10 @@ import type { AgentController } from "./agent/controller";
 import type { SkillCatalog } from "./skills/catalog";
 import type { MetadataService } from "./agent/metadata-tools";
 import type { PluginLifecycleService } from "./agent/plugin-tools";
-import type { ApprovalController } from "./ui/approval-modal";
+import type { ApprovalController } from "./ui/approval";
 import { HistoryStore } from "./agent/history";
 import logoSvg from "../assets/obsidiai-logo.svg";
+import { openNotePaths, captureOpenNotes } from "./vault/open-notes";
 
 export function supportedNode(version: string): boolean {
  const [major = 0, minor = 0, patch = 0] = version.split(".").map(Number);
@@ -30,12 +31,22 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
  private opening?: Promise<WorkspaceLeaf>;
  private disposed = false;
  private readonly listeners = new Set<() => void>();
+ private recentMarkdownView: MarkdownView | null = null;
  async onload(): Promise<void> {
   const logo = new DOMParser().parseFromString(logoSvg, "image/svg+xml").documentElement;
   logo.querySelectorAll("title, desc").forEach(element => element.remove());
   addIcon("obsidiai-logo", `<g transform="scale(0.78125)">${logo.innerHTML}</g>`);
   this.settings = loadSettings(await this.loadData());
   await this.saveSettings();
+  const notifyOpenNotes = () => { for (const listener of this.listeners) listener(); };
+  this.registerEvent(this.app.workspace.on("file-open", notifyOpenNotes));
+  this.registerEvent(this.app.workspace.on("layout-change", notifyOpenNotes));
+  this.registerEvent(this.app.workspace.on("active-leaf-change", leaf => {
+   if (leaf?.view instanceof MarkdownView) this.recentMarkdownView = leaf.view;
+   notifyOpenNotes();
+  }));
+  this.registerEvent(this.app.vault.on("rename", notifyOpenNotes));
+  this.registerEvent(this.app.vault.on("delete", notifyOpenNotes));
   const version = typeof process !== "undefined" ? process.versions?.node ?? "0" : "0";
   if (!supportedNode(version)) {
    this.disabledReason = `ObsidiAI needs embedded Node 22.19.0 or newer (found ${version}). Update the Obsidian desktop installer; updating only the app may not update its embedded runtime.`;
@@ -43,12 +54,12 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
   } else {
    try {
     const [{ createProviderRuntime }, { AgentController }, { VaultToolService }, { ApprovalController }, { MetadataService }, { SkillCatalog }, { SkillToolService }, { PluginLifecycleService }] = await Promise.all([
-     import("./agent/runtime"), import("./agent/controller"), import("./agent/vault-tools"), import("./ui/approval-modal"), import("./agent/metadata-tools"), import("./skills/catalog"), import("./agent/skill-tools"), import("./agent/plugin-tools")
+     import("./agent/runtime"), import("./agent/controller"), import("./agent/vault-tools"), import("./ui/approval"), import("./agent/metadata-tools"), import("./skills/catalog"), import("./agent/skill-tools"), import("./agent/plugin-tools")
     ]);
     if (this.disposed) return;
     this.credentials = new ObsidianCredentialStore(this.app, this.settings.credentialSecretId);
     this.runtime = createProviderRuntime(this.credentials);
-    this.approvals = new ApprovalController(this.app);
+    this.approvals = new ApprovalController();
     const notes = new VaultToolService(this.app, this.approvals);
     this.metadata = new MetadataService(this.app, this);
     this.catalog = new SkillCatalog(this.app, () => this.settings.skillsFolder, this);
@@ -75,11 +86,15 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
   } });
  }
  saveSettings(): Promise<void> {
-  const snapshot = { providerId: this.settings.providerId, modelId: this.settings.modelId, thinkingLevel: this.settings.thinkingLevel, credentialSecretId: this.settings.credentialSecretId, skillsFolder: this.settings.skillsFolder };
+  const snapshot = { providerId: this.settings.providerId, modelId: this.settings.modelId, thinkingLevel: this.settings.thinkingLevel, credentialSecretId: this.settings.credentialSecretId, skillsFolder: this.settings.skillsFolder, autoAttachOpenNotes: this.settings.autoAttachOpenNotes };
   const next = this.saveQueue.then(() => this.saveData(snapshot)); this.saveQueue = next.catch(() => undefined); return next;
  }
  isRunning(): boolean { return this.controller !== null && !this.controller.idle; }
  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+ openNotePaths(): string[] { return openNotePaths(this.app); }
+ captureOpenNotes(excludedPaths: readonly string[]): Promise<{ path: string; content: string }[]> {
+  return this.settings.autoAttachOpenNotes ? captureOpenNotes(this.app, excludedPaths, this.recentMarkdownView) : Promise.resolve([]);
+ }
  async connectionChanged(): Promise<void> { await this.controller?.configure(this.settings.providerId, this.settings.modelId, this.settings.thinkingLevel); for (const listener of this.listeners) listener(); }
  skillsStatus(): string { return this.catalog ? this.catalog.diagnostics.map(d => typeof d === "string" ? d : JSON.stringify(d)).join("\n") || `${this.catalog.entries.length} skills found in ${this.settings.skillsFolder}.` : "Skills are unavailable until the desktop runtime starts."; }
  async refreshSkills(): Promise<void> { await this.catalog?.refresh(true); for (const listener of this.listeners) listener(); }
@@ -109,6 +124,7 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
  onunload(): void {
   this.disposed = true; AuthModal.cancelAll(); ConnectionSettingsModal.cancelAll(); disposeProviderSettings(this); this.approvals?.cancelAll(); this.metadata?.dispose(); this.lifecycle?.dispose();
   this.catalog?.dispose();
+  this.recentMarkdownView = null;
   void this.controller?.dispose().catch(() => { new Notice("Chat history could not be saved while unloading. The latest conversation may not be stored."); }).finally(() => this.credentials?.dispose()); this.listeners.clear();
   if (!this.controller) this.credentials?.dispose();
  }

@@ -1,7 +1,7 @@
 import { requireApiVersion, type App } from 'obsidian';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { Type } from '@earendil-works/pi-ai';
-import type { ApprovalController } from '../ui/approval-modal';
+import type { ApprovalController } from '../ui/approval';
 import { PluginBridge, PluginPolicyError, validatePluginId, type NativeMethod, type PluginAction, type PluginChangeProposal, type PluginObservedState, type PluginRelease } from '../plugins/bridge';
 import { compareVersions, PluginRegistry } from '../plugins/registry';
 

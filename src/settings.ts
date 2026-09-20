@@ -11,6 +11,7 @@ export interface ObsidiAISettings {
  thinkingLevel: ModelThinkingLevel;
  credentialSecretId: string;
  skillsFolder: string;
+ autoAttachOpenNotes: boolean;
 }
 export function loadSettings(data: unknown): ObsidiAISettings {
  const stored = data !== null && typeof data === "object" ? data as Partial<ObsidiAISettings> : {};
@@ -20,6 +21,7 @@ export function loadSettings(data: unknown): ObsidiAISettings {
   thinkingLevel: stored.thinkingLevel && ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(stored.thinkingLevel) ? stored.thinkingLevel : "off",
   credentialSecretId: typeof stored.credentialSecretId === "string" && stored.credentialSecretId.length > 0 ? stored.credentialSecretId : `obsidiai-${crypto.randomUUID()}`,
   skillsFolder: typeof stored.skillsFolder === "string" ? stored.skillsFolder : "Skills",
+  autoAttachOpenNotes: stored.autoAttachOpenNotes === true,
  };
 }
 export interface SettingsHost {
@@ -115,6 +117,16 @@ export function renderProviderSettings(containerEl: HTMLElement, host: SettingsH
   const models = host.runtime?.models;
   if (shared.message) containerEl.createEl("p", { text: shared.message, cls: "obsidiai-status" });
   if (host.credentials?.storageError) containerEl.createEl("p", { text: host.credentials.storageError, cls: "obsidiai-error" });
+  new Setting(containerEl).setName("Automatically attach open notes")
+   .setDesc("Off by default. On Send, include current open visible Markdown notes, including unsaved editor changes, unless excluded in the composer. Their contents are sent to the selected provider and retained in saved chat history. Enabling this alone sends nothing.")
+   .addToggle(toggle => toggle.setValue(host.settings.autoAttachOpenNotes).setDisabled(disabled).onChange(value => {
+    void perform(async () => {
+     const previous = host.settings.autoAttachOpenNotes;
+     host.settings.autoAttachOpenNotes = value;
+     try { await host.saveSettings(); }
+     catch (error) { host.settings.autoAttachOpenNotes = previous; throw error; }
+    });
+   }));
   containerEl.createEl("h3", { text: "Saved provider logins" });
   containerEl.createEl("p", { text: "One saved login per provider. Adding or reconnecting a provider does not change your chat selection. Saved login metadata does not verify remote access. Ambient environment/profile authentication remains available separately." });
   const savedArea = containerEl.createDiv();

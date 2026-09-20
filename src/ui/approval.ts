@@ -1,48 +1,20 @@
-import { App, ButtonComponent, Modal } from 'obsidian';
-import { diffLines } from 'diff';
 import type { PluginChangeProposal } from '../plugins/bridge';
-import { PluginApprovalModal } from './plugin-approval-modal';
 
 export type NoteProposal = Readonly<{ kind: 'note-change'; operation: 'edit' | 'create'; path: string; before: string; after: string }>;
 export type Proposal = NoteProposal | Readonly<{ kind: 'plugin-change'; change: PluginChangeProposal }>;
 export type ApprovalDecision = 'approve' | 'reject';
 export type PermissionMode = 'read-only' | 'ask' | 'auto-approve-notes';
-
-export class ApprovalModal extends Modal {
-  private decided = false;
-  constructor(app: App, private readonly proposal: NoteProposal, private readonly onDecision: (decision: ApprovalDecision) => void) { super(app); }
-  onOpen(): void {
-    this.setTitle(this.proposal.operation === 'create' ? 'Create note?' : 'Edit note?');
-    this.contentEl.createEl('p', { text: this.proposal.path });
-    const diff = this.contentEl.createDiv({ cls: 'obsidiai-note-diff' });
-    for (const part of diffLines(this.proposal.before, this.proposal.after)) {
-      diff.createEl('pre', { text: part.value, cls: part.added ? 'obsidiai-diff-added' : part.removed ? 'obsidiai-diff-removed' : 'obsidiai-diff-context' });
-    }
-    const controls = this.contentEl.createDiv({ cls: 'obsidiai-approval-controls' });
-    const reject = new ButtonComponent(controls).setButtonText('Reject').onClick(() => this.decide('reject'));
-    new ButtonComponent(controls).setButtonText('Approve').setCta().onClick(() => this.decide('approve'));
-    reject.buttonEl.focus();
-  }
-  private decide(decision: ApprovalDecision): void {
-    if (this.decided) return;
-    this.decided = true;
-    this.onDecision(decision);
-    this.close();
-  }
-  onClose(): void {
-    if (!this.decided) {
-      this.decided = true;
-      this.onDecision('reject');
-    }
-    this.contentEl.empty();
-  }
-}
+export type PendingApproval = Readonly<{ id: string; proposal: Proposal }>;
 
 export class ApprovalController {
   private permissionMode: PermissionMode = 'ask';
-  private pending: { settle: (decision: ApprovalDecision) => void } | null = null;
+  private pending: { review: PendingApproval; settle: (decision: ApprovalDecision) => void } | null = null;
   private readonly listeners = new Set<(pending: boolean) => void>();
-  constructor(private readonly app: App) {}
+  get current(): PendingApproval | null { return this.pending?.review ?? null; }
+  decide(id: string, decision: ApprovalDecision): void {
+    if (this.pending?.review.id !== id) return;
+    this.pending.settle(decision === 'approve' ? 'approve' : 'reject');
+  }
   get mode(): PermissionMode { return this.permissionMode; }
   setMode(mode: PermissionMode): void {
     if (mode !== 'read-only' && mode !== 'ask' && mode !== 'auto-approve-notes') throw new Error('Invalid permission mode.');
@@ -62,26 +34,20 @@ export class ApprovalController {
     if (this.permissionMode === 'auto-approve-notes' && proposal.kind === 'note-change') return Promise.resolve('approve');
     const { promise, resolve } = Promise.withResolvers<ApprovalDecision>();
     let settled = false;
-    let modal: Modal | undefined;
     const abort = () => settle('reject');
     const settle = (decision: ApprovalDecision) => {
       if (settled) return;
       settled = true;
       signal?.removeEventListener('abort', abort);
       this.pending = null;
-      modal?.close();
       resolve(signal?.aborted ? 'reject' : decision);
       this.notify();
     };
-    this.pending = { settle };
+    this.pending = { review: Object.freeze({ id: crypto.randomUUID(), proposal: Object.freeze({ ...proposal }) }), settle };
     signal?.addEventListener('abort', abort, { once: true });
     try {
-      modal = proposal.kind === 'note-change'
-        ? new ApprovalModal(this.app, Object.freeze({ ...proposal }), settle)
-        : new PluginApprovalModal(this.app, proposal.change, settle);
       this.notify();
-      if (signal?.aborted || settled) settle('reject');
-      else modal.open();
+      if (signal?.aborted) settle('reject');
     } catch {
       settle('reject');
     }

@@ -5,7 +5,8 @@ import type { AgentController, TimelineItem } from "../agent/controller";
 import { ConnectionSettingsModal, getConnectionBusy, runConnectionOperation, subscribeConnectionState } from "../settings";
 import type { SettingsHost } from "../settings";
 import { validateVaultPath } from "../vault/paths";
-import type { PermissionMode } from "./approval-modal";
+import type { PermissionMode } from "./approval";
+import { renderApprovalCard } from "./approval-card";
 import { ComposerSuggest, type ComposerChoice, type ComposerTrigger } from "./composer-suggest";
 import { ChatHistoryModal } from "./history-modal";
 
@@ -15,6 +16,8 @@ export interface AgentViewHost extends SettingsHost {
  disabledReason: string;
  skillChoices(): Promise<{ name: string; description: string; diagnostic?: boolean; userInvocable?: boolean }[]>;
  viewClosed(closingLeaf: WorkspaceLeaf): void;
+ openNotePaths(): string[];
+ captureOpenNotes(excludedPaths: readonly string[]): Promise<{ path: string; content: string }[]>;
 }
 class ChoiceModal<T> extends FuzzySuggestModal<T> {
  constructor(app: App, private readonly choices: T[], private readonly label: (item: T) => string, private readonly choose: (item: T) => void) { super(app); }
@@ -46,7 +49,14 @@ interface RenderedMessage {
  tail?: HTMLElement;
  tailText?: string;
 }
+interface RenderedToolChain {
+ el: HTMLDetailsElement;
+ body: HTMLElement;
+ label: HTMLElement;
+ status: HTMLElement;
+}
 const TOOL_PRESENTATION: Record<string, { label: string; icon: string }> = {
+ list_files: { label: "Exploring folders", icon: "folder-tree" },
  search_notes: { label: "Searching notes", icon: "search" },
  read_note: { label: "Reading a note", icon: "file-text" },
  propose_note_edit: { label: "Note edit", icon: "file-pen-line" },
@@ -94,6 +104,8 @@ export class AgentView extends ItemView {
  private thinkingLabel?: HTMLElement;
  private permissionButton?: ButtonComponent;
  private permissionLabel?: HTMLElement;
+ private openNotesButton?: ButtonComponent;
+ private readonly excludedOpenNotes = new Set<string>();
  private disclosure?: HTMLElement;
  private modelProbe?: AbortController;
  private selectionModal?: FuzzySuggestModal<Model<Api>> | FuzzySuggestModal<ModelThinkingLevel> | FuzzySuggestModal<PermissionMode>;
@@ -110,6 +122,9 @@ export class AgentView extends ItemView {
  private attachmentStatus?: HTMLElement;
  private readonly rendered = new Map<string, RenderedMessage>();
  private readonly draftChips = new Map<string, HTMLButtonElement>();
+ private readonly toolChains = new Map<string, RenderedToolChain>();
+ private approvalEl?: HTMLElement;
+ private approvalId?: string;
  constructor(leaf: WorkspaceLeaf, private readonly host: AgentViewHost) { super(leaf); }
  getViewType(): string { return AGENT_VIEW_TYPE; }
  getDisplayText(): string { return "ObsidiAI"; }
@@ -139,12 +154,14 @@ export class AgentView extends ItemView {
     this.attachmentEpoch++; this.composerSuggest?.dismiss();
     void controller.reset().then(() => {
      if (!this.textarea || this.closed) return;
+     this.excludedOpenNotes.clear();
      this.textarea.value = ""; this.attachmentStatus?.empty(); this.resizeComposer(); this.textarea.focus(); this.schedule();
     }).catch(error => { if (!this.closed) new Notice(error instanceof Error ? error.message : "Could not start a new conversation. Your current chat is retained."); });
    });
    this.historyButton = this.iconButton(headerActions, "Conversation history", "history", () => {
     if (!controller.idle || this.attachmentPending) return;
     this.attachmentEpoch++; this.composerSuggest?.dismiss();
+    this.excludedOpenNotes.clear();
     this.historyModal = new ChatHistoryModal(this.app, controller); this.historyModal.open();
    });
   }
@@ -212,6 +229,10 @@ export class AgentView extends ItemView {
   skills.buttonEl.addClass("obsidiai-text-button");
   setIcon(skills.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
   skills.buttonEl.createSpan({ text: "Skills" });
+  this.openNotesButton = new ButtonComponent(contextActions).onClick(() => { void this.toggleOpenNotes(); });
+  this.openNotesButton.buttonEl.addClass("obsidiai-text-button", "obsidiai-open-notes-button");
+  setIcon(this.openNotesButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "panels-top-left");
+  this.openNotesButton.buttonEl.createSpan({ text: "Open notes" });
   const modelActions = actions.createDiv({ cls: "obsidiai-model-actions" });
   this.modelButton = new ButtonComponent(modelActions).onClick(() => { void this.chooseModel(); });
   this.modelButton.buttonEl.addClass("obsidiai-model-button");
@@ -328,6 +349,18 @@ export class AgentView extends ItemView {
   picker.setPlaceholder("Permissions · resets to Ask before changes for each new conversation");
   this.selectionModal = picker; picker.open();
  }
+ private async toggleOpenNotes(): Promise<void> {
+  if (this.closed || !this.host.controller?.idle || this.attachmentPending || getConnectionBusy(this.host)) return;
+  try {
+   await runConnectionOperation(this.host, async () => {
+    const previous = this.host.settings.autoAttachOpenNotes;
+    this.host.settings.autoAttachOpenNotes = !previous;
+    try { await this.host.saveSettings(); }
+    catch (error) { this.host.settings.autoAttachOpenNotes = previous; throw error; }
+    this.excludedOpenNotes.clear();
+   });
+  } catch { if (!this.closed) new Notice("Could not save open-note context. The previous setting is retained."); }
+ }
  private permittedNotes(): TFile[] {
   return this.app.vault.getMarkdownFiles().filter(file => { try { validateVaultPath(file.path, this.app.vault.configDir); return true; } catch { return false; } });
  }
@@ -387,14 +420,33 @@ export class AgentView extends ItemView {
   const controller = this.host.controller;
   if (!controller || !this.textarea || !controller.idle || this.attachmentPending || (!this.textarea.value.trim() && !controller.selectedSkills.size)) return;
   if (getConnectionBusy(this.host)) { new Notice("Wait for the connection operation to finish."); return; }
+  if (!controller.ready) { new Notice(controller.setupMessage); return; }
   const draft = this.textarea.value;
-  this.attachmentEpoch++; this.composerSuggest?.dismiss(); this.contextModal?.close();
+  const epoch = ++this.attachmentEpoch;
+  const autoAttach = this.host.settings.autoAttachOpenNotes;
+  const automaticIds: string[] = [];
+  this.composerSuggest?.dismiss(); this.contextModal?.close();
+  this.attachmentPending = true; this.schedule();
   try {
+   if (autoAttach) {
+    const snapshots = await this.host.captureOpenNotes([...this.excludedOpenNotes, ...controller.attachments.map(a => a.path)]);
+    if (this.closed || epoch !== this.attachmentEpoch || !controller.idle || !this.host.settings.autoAttachOpenNotes) return;
+    for (const snapshot of snapshots) {
+     controller.addAttachment(snapshot.path, snapshot.content);
+     automaticIds.push(controller.attachments.at(-1)!.id);
+    }
+   }
    await controller.send(draft, () => {
+    this.excludedOpenNotes.clear();
     if (this.textarea?.value === draft && !this.closed) { this.textarea.value = ""; this.attachmentStatus?.empty(); this.resizeComposer(); }
     this.followLatest = true;
    });
-  } catch (error) { new Notice(error instanceof Error && error.name !== "AbortError" ? error.message : "Stopped before submission."); }
+  } catch (error) { if (!this.closed) new Notice(error instanceof Error && error.name !== "AbortError" ? error.message : "Stopped before submission."); }
+  finally {
+   // Failed preparation must not turn automatic snapshots into stale manual attachments.
+   for (const id of automaticIds) if (controller.attachments.some(a => a.id === id)) controller.removeAttachment(id);
+   this.attachmentPending = false; this.schedule();
+  }
  }
  private resizeComposer(): void {
   if (!this.textarea || this.closed) return;
@@ -438,6 +490,9 @@ export class AgentView extends ItemView {
   this.permissionLabel!.setText(permission);
   this.permissionButton!.setDisabled(!controller.idle || busy).setTooltip(`${PERMISSION_DESCRIPTIONS[controller.permissionMode]} New conversations reset to Ask before changes.`);
   this.permissionButton!.buttonEl.setAttr("aria-label", `Permissions: ${permission}`);
+  this.openNotesButton!.setDisabled(!controller.idle || this.attachmentPending || busy)
+   .setTooltip(this.host.settings.autoAttachOpenNotes ? "Open-note context is on. Visible Markdown tabs are captured at Send, including unsaved edits. Remove a chip to exclude a note for this message." : "Automatically attach open Markdown notes at Send. Their contents go to your provider and saved chat history.");
+  this.openNotesButton!.buttonEl.setAttrs({ "aria-pressed": String(this.host.settings.autoAttachOpenNotes), "aria-label": "Automatically attach open notes" });
   this.permissionButton!.buttonEl.setAttr("data-mode", controller.permissionMode);
   this.disclosure!.setText(`The agent may read notes, metadata, graph links, skills, and non-secret plugin manifests and send context to your provider. ${PERMISSION_DESCRIPTIONS[controller.permissionMode]} Plugin changes can run third-party code. ${controller.historyMessage}`);
   this.newButton!.setDisabled(!controller.idle || this.attachmentPending);
@@ -453,15 +508,31 @@ export class AgentView extends ItemView {
    const key = `note:${attachment.id}`; chipKeys.add(key);
    if (!this.draftChips.has(key)) this.addDraftChip(key, attachment.path, "file-text", () => controller.removeAttachment(attachment.id));
   }
+  if (this.host.settings.autoAttachOpenNotes && controller.idle && !this.attachmentPending) {
+   const manualPaths = new Set(controller.attachments.map(a => a.path));
+   for (const path of this.host.openNotePaths()) {
+    if (manualPaths.has(path) || this.excludedOpenNotes.has(path)) continue;
+    const key = `open:${path}`; chipKeys.add(key);
+    if (!this.draftChips.has(key)) {
+     this.addDraftChip(key, path, "panels-top-left", () => { this.excludedOpenNotes.add(path); this.schedule(); });
+     this.draftChips.get(key)!.addClass("obsidiai-auto-context");
+     this.draftChips.get(key)!.setAttrs({ title: `Open note · captured at Send: ${path}`, "aria-label": `Exclude open note from this message: ${path}` });
+    }
+   }
+  }
   for (const name of controller.selectedSkills) {
    const key = `skill:${name}`; chipKeys.add(key);
    if (!this.draftChips.has(key)) this.addDraftChip(key, name, "sparkles", () => controller.removeSkill(name));
   }
-  for (const [key, button] of this.draftChips) if (!chipKeys.has(key)) { button.remove(); this.draftChips.delete(key); }
+  for (const [key, button] of this.draftChips) {
+   if (!chipKeys.has(key)) { button.remove(); this.draftChips.delete(key); }
+   else button.disabled = !controller.idle || this.attachmentPending;
+  }
   this.chips!.hidden = chipKeys.size === 0;
   const ids = new Set(controller.timeline.map(item => item.id));
   for (const [id, rendered] of this.rendered) if (!ids.has(id)) { if (rendered.component) this.removeChild(rendered.component); rendered.el.remove(); this.rendered.delete(id); }
-  for (const item of controller.timeline) this.renderItem(item);
+  this.renderTimeline(controller.timeline);
+  this.renderApproval();
   this.scrollViewportWidth = this.scrollEl!.clientWidth;
   this.scrollViewportHeight = this.scrollEl!.clientHeight;
   if (this.followLatest) this.scrollToLatest();
@@ -476,10 +547,62 @@ export class AgentView extends ItemView {
   this.draftChips.set(key, button);
  }
 
- private renderItem(item: TimelineItem): void {
+ private renderTimeline(items: TimelineItem[]): void {
+  const chains = new Set<string>();
+  let chain: RenderedToolChain | undefined;
+  let count = 0, working = false, failed = false;
+  const update = () => {
+   if (!chain) return;
+   chain.label.setText(`${count} tool call${count === 1 ? "" : "s"}`);
+   const status = working ? STATUS_LABELS[this.host.controller!.state] ?? "Working" : failed ? "Needs attention" : "Finished";
+   chain.status.setText(status);
+   chain.el.setAttr("data-state", working ? this.host.controller!.state : failed ? "error" : "complete");
+  };
+  for (const item of items) {
+   if (item.kind === "tool") {
+    if (!chain) {
+     chains.add(item.id);
+     chain = this.toolChains.get(item.id);
+     if (!chain) {
+      const el = this.timelineEl!.createEl("details", { cls: "obsidiai-tool-chain" });
+      const summary = el.createEl("summary", { cls: "obsidiai-chain-summary" });
+      setIcon(summary.createSpan({ cls: "obsidiai-chain-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
+      const label = summary.createSpan({ cls: "obsidiai-chain-label" });
+      const status = summary.createSpan({ cls: "obsidiai-chain-status" });
+      chain = { el, label, status, body: el.createDiv({ cls: "obsidiai-chain-body" }) };
+      this.toolChains.set(item.id, chain);
+     }
+     count = 0; working = false; failed = false;
+    }
+    count++; working ||= !item.complete;
+    failed ||= ["error", "failed", "conflict"].includes(item.status ?? "");
+    this.renderItem(item, chain.body);
+   } else {
+    // Tool-only assistant messages carry no visible narrative and do not split a chain.
+    if (item.kind !== "assistant" || item.text) { update(); chain = undefined; }
+    this.renderItem(item, this.timelineEl!);
+   }
+  }
+  update();
+  for (const [id, group] of this.toolChains) if (!chains.has(id)) { group.el.remove(); this.toolChains.delete(id); }
+ }
+ private renderApproval(): void {
+  const approvals = this.host.controller!.services.approvals;
+  const pending = approvals.current;
+  if (pending?.id === this.approvalId) return;
+  this.approvalEl?.remove(); this.approvalEl = undefined;
+  this.approvalId = pending?.id;
+  if (!pending) return;
+  // Outside collapsible tool details: a collapsed chain must never hide the decision.
+  this.approvalEl = this.timelineEl!.createDiv({ cls: "obsidiai-inline-approval", attr: { role: "region", "aria-label": "Pending tool approval" } });
+  renderApprovalCard(this.approvalEl, pending, decision => {
+   if (!this.closed) approvals.decide(pending.id, decision);
+  });
+ }
+ private renderItem(item: TimelineItem, parent: HTMLElement): void {
   let rendered = this.rendered.get(item.id);
   if (!rendered) {
-   const el = this.timelineEl!.createEl(item.kind === "tool" ? "details" : "div", { cls: `obsidiai-message obsidiai-${item.kind}` });
+   const el = parent.createEl(item.kind === "tool" ? "details" : "div", { cls: `obsidiai-message obsidiai-${item.kind}` });
    let status: HTMLElement | undefined;
    let context: HTMLElement | undefined;
    let notice: HTMLElement | undefined;
@@ -522,6 +645,7 @@ export class AgentView extends ItemView {
    rendered = { el, body, text, last: "", complete: false, status, context, notice };
    this.rendered.set(item.id, rendered);
   }
+  if (rendered.el.parentElement !== parent) parent.appendChild(rendered.el);
   if (item.kind === "tool") {
    const status = item.complete ? item.status ?? "success" : this.host.controller?.state === "awaiting-approval" ? "awaiting-approval" : this.host.controller?.state === "stopping" ? "stopping" : "running";
    rendered.el.setAttr("data-status", status);
@@ -598,7 +722,9 @@ export class AgentView extends ItemView {
   if (this.frame !== undefined) this.contentEl.win.cancelAnimationFrame(this.frame);
   this.frame = undefined;
   for (const item of this.rendered.values()) if (item.component) this.removeChild(item.component);
-  this.rendered.clear(); this.draftChips.clear();
+  this.rendered.clear(); this.draftChips.clear(); this.toolChains.clear();
+  this.approvalEl?.remove(); this.approvalEl = undefined; this.approvalId = undefined;
+  this.excludedOpenNotes.clear();
  }
  async onClose(): Promise<void> { this.release(); this.host.viewClosed(this.leaf); }
  onunload(): void { this.release(); }
