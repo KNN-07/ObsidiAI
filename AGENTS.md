@@ -2,80 +2,98 @@
 
 ## Project Overview
 
-ObsidiAI is a desktop-only Obsidian plugin providing a native workspace AI-agent tab powered by pi. It runs in-process, not through a terminal, subprocess, or iframe. Its 18 tools cover the visible file tree, Markdown notes, native metadata/graph queries, instruction-only skills, and approval-bound community-plugin lifecycle and settings management.
+ObsidiAI is a desktop-only Obsidian plugin embedding a pi-powered AI agent in a native workspace tab. It runs in-process, not through a terminal, subprocess, or iframe. Tools cover visible vault files, Markdown editing, native metadata/graph queries, instruction-only skills, and approval-bound community-plugin lifecycle/settings management.
 
 ## Architecture & Data Flow
 
-- `src/main.ts` is the composition/lifecycle root. It persists settings, checks embedded Node compatibility **before dynamically importing the agent runtime**, constructs services, and registers the native view, commands, and settings.
-- `src/agent/runtime.ts` is the single provider factory: pi's built-in model catalog, static OAuth/Bedrock registration, and SSE transport. `credentials.ts` serializes credential mutations into one plugin-owned Obsidian SecretStorage entry.
-- `src/agent/controller.ts` coordinates one real pi `Agent` and sequential tools. Draft attachments/selected skills become untrusted user context on Send; agent events become timeline items in `src/ui/agent-view.ts`. Run states are `idle`, `running`, `awaiting-approval`, and `stopping`.
-- User timeline text is the original submitted draft. Typed attachments live in `src/agent/attachments.ts`: note/text bodies and real pi image blocks belong only in model messages; `attachmentReferences` indexes those user-message blocks for snapshot previews without duplicating payloads in history. Keep legacy `attachmentPaths` history readable. Only note attachments supply Markdown source paths. Reject text-only models for image-containing draft or historical context before consuming drafts.
-- `src/ui/attachment-input.ts` is shared by computer-file selection, clipboard files, and native drag/drop. Check raster signatures, UTF-8 validity and bounds; never execute content or persist computer directory paths. Recognized source extensions can override incorrect platform MIME labels, but not byte validation. Large paste (4,000 characters or 40 lines) becomes an in-memory text attachment. Preview via `attachment-preview.ts` as safe raw text or raster images; no vault or OS temporary-file writes. Guard late file reads with the view attachment epoch and preserve unsent inputs on failures. Limits: 200k text characters, 5 MiB/image, 20 attachments and 20 MiB total per message.
-- Modifier-click handling is capture-scoped to the chat timeline: Ctrl/Cmd-click internal links and note embeds calls native `openLinkText` with `"tab"` and the message source path, preventing duplicate native handling. Ordinary rendered-link behavior remains native.
-- `src/vault/open-notes.ts` inspects open Markdown leaves only. The persisted `autoAttachOpenNotes` preference defaults off; the composer previews paths and captures allowed current editor/disk snapshots on Send. Manual attachments take precedence, per-message exclusions reset after submission, and automatic snapshots must not remain as stale draft attachments after preparation fails.
-- Tool-only assistant messages do not split a collapsible tool chain. Keep per-call results and pending approval cards independently accessible; collapsed chains must never hide approval controls.
-- Thinking effort uses pi's `getSupportedThinkingLevels` and `clampThinkingLevel`. Settings persist the preferred level; the controller exposes the effective level for the selected model and applies it to the existing Agent without resetting the conversation.
-- Note/plugin services request decisions from the shared `ApprovalController` in `src/ui/approval.ts`. Its session-only `PermissionMode` is `ask` by default, `read-only` rejects mutations but allows reviewed settings disclosure, and `auto-approve-notes` bypasses only note approvals. Controller guards changes while running and resets mode for new conversations. `current` exposes one pending proposal; `decide(id, decision)` ignores stale IDs, and its lifetime signal disables settled controls and disclosure callbacks. `renderApprovalCard` displays safe text diffs, unchecked local settings fields, and plugin warnings inline. Stop and last-view closure cancel pending decisions; this is not rollback after mutation starts.
-- Preferences alone go through serialized `saveSettings()`. `HistoryStore` serializes settled Agent messages and timeline to plugin-local `history.json`; summaries omit payloads, and reopen restores context using the current selected model. ObsidiAI provider credentials never belong in history, `data.json`, tool results, or logs. Other plugins' explicitly selected JSON values are disclosed to the provider and persisted in history; unselected settings must stay local. Unsent drafts and permission modes remain in memory. Provider errors are reduced to fixed safe status messages before display/persistence.
-- `src/ui/history-view.ts` is a lifecycle-owned screen inside `AgentView`, not a modal or a separate persistence layer. Search summaries only, group dates locally, and bound rendered rows while searching the full list. Multi-selection survives filters; Select all results covers all matches, not just rendered rows. Snapshot IDs for explicit inline confirmation, show the off-filter selection count, and lock changes while saving. `deleteConversations(ids)` uses one queued history write for the batch; publish removals and reset an included active chat only after success. Preserve the selection on failure. Guard operations with busy/idle state and discard late reads after navigation or disposal. Returning to chat without selecting another conversation preserves the draft.
-- Provider login management is separate from active chat selection: one saved credential per provider, with shared `runConnectionOperation` serialization for authentication/model/effort changes. Pi spreads `AuthInteraction`; keep `AuthModal.prompt` and `notify` as own, bound callbacks.
-- `ComposerSuggest` owns textarea keyboard interaction for `@` notes/folders and `/` skill commands. Preserve IME, caret, async generation/attachment guards, and Enter-to-select before Send. `user-invocable: false` forbids explicit skill invocation; `disable-model-invocation: true` requires it.
+- `src/main.ts` is the composition/lifecycle root. It checks the host's embedded Node version **before dynamically importing the agent runtime**, constructs shared services, and registers views, commands, and settings. Preserve this lazy runtime boundary.
+- `src/agent/runtime.ts` is the provider factory: pi's built-in model catalog, OAuth/Bedrock registration, and SSE transport. `AgentController` receives the runtime and tool services through dependency injection and owns one real pi `Agent` with sequential tool execution.
+- Send captures the draft, attachments, open-note snapshots, and selected skills as untrusted model context. Agent events become timeline items in `src/ui/agent-view.ts`. The controller owns `idle`, `running`, `awaiting-approval`, and `stopping`; connection/model/effort changes share serialized `runConnectionOperation` handling.
+- `src/ui/approval.ts` owns one pending proposal. Session-only permissions default to `ask`; `read-only` rejects mutations but permits reviewed settings disclosure; `auto-approve-notes` bypasses only note approvals. Stale decisions are ignored. Stop/last-view closure cancels pending decisions, not already-started mutations. Collapsed tool chains must never hide approval controls.
+- Keep persistence boundaries separate: preferences use queued `saveSettings()`; provider credentials use one plugin-owned Obsidian SecretStorage entry; `HistoryStore` queues settled messages/timeline into plugin-local `history.json`. Drafts and permission modes stay in memory. Publish persisted state only after writes succeed.
+- Provider credentials must never enter settings JSON, history, tool results, or logs. Other plugins' explicitly selected settings may enter model context/history; unselected values stay local. Provider failures become fixed safe status messages, never upstream response bodies.
+- `history-view.ts` is a screen owned by `AgentView`, not a separate store. Search summaries, bound rendered rows, retain selection across filters, and batch deletions into one queued write. Reset an included active chat only after successful persistence; navigation back to chat preserves its draft.
 
 ## Key Directories
 
-- `src/agent/`: provider transport, credentials, conversation orchestration, and tool services.
-- `src/ui/`: native Obsidian views, authentication dialogs, and inline approval presentation.
-- `src/vault/`, `src/skills/`, `src/plugins/`: shared path policy, vault-local skill discovery, and isolated native plugin-manager/release boundaries.
-- `.github/workflows/`: shared CI and tag-triggered publication; `.github/release-notes/` holds reviewed per-version notes. `scripts/check-release.mjs` validates release metadata and built assets.
-- `tests/`: behavioral suites; `tests/fixtures/knowledge.ts` shares metadata/graph host doubles. Other fixtures are mostly suite-local.
-- `assets/`: shared notebook logo and native README screenshots. The SVG is imported as text and registered as `obsidiai-logo`, bundled into main.js so installation still needs only three files. Preview providers and sample conversations are not remote-provider verification.
+- `src/agent/`: conversation orchestration, providers/credentials/history, and Agent-facing tool services.
+- `src/ui/`: native views, composer/attachment handling, authentication, and approval presentation.
+- `src/vault/`, `src/skills/`, `src/plugins/`: shared path/open-note policies, vault-local skill discovery, and isolated native plugin-manager/release/settings boundaries.
+- `tests/`: behavioral suites and narrow host doubles; shared metadata/graph fixtures live in `tests/fixtures/knowledge.ts`.
+- `docs/`: user behavior in `GUIDE.md`, contributor/release workflows in `DEVELOPMENT.md`.
+- `scripts/`, `.github/workflows/`, `.github/release-notes/`: release validation, CI/publication, and reviewed per-version notes.
+- `assets/`: documentation screenshots and SVG logo. The logo is bundled into `main.js`, not installed as a separate asset.
 
 ## Development Commands
 
-Run from the repository root:
+Run from the repository root with Node and npm:
 
 ```sh
 npm ci                                    # Install the locked dependency graph
-npm run typecheck                         # Strict source and test checking
+npm run typecheck                         # Strict source and test checking; no emission
 npm run build                             # Typecheck, then production main.js
-npm run check:release                     # Validate versions and built release assets
 npm test                                  # Vitest, one complete run
-npm test -- tests/vault-tools.test.ts      # Focused suite
+npm test -- tests/vault-tools.test.ts      # Focused behavioral suite
+npm run check:release                     # Validate metadata and existing built assets
+node --check main.js                      # CI's generated-bundle syntax check
 npm run dev                               # Long-running esbuild watch
 ```
 
-No lint/format script or configured formatter exists. Watch mode does not launch Obsidian. To run the plugin, install `main.js`, `manifest.json`, and `styles.css` under a disposable vault's `.obsidian/plugins/obsidiai/` and enable it there.
+No lint/format script or configured formatter exists. There is no Obsidian launch script: watch mode only rebuilds. To exercise the plugin, install `main.js`, `manifest.json`, and `styles.css` under a disposable vault's `.obsidian/plugins/obsidiai/` and enable it in Obsidian.
 
 ## Code Conventions & Common Patterns
 
-- Use strict TypeScript, type-only imports for type dependencies, PascalCase classes, camelCase members, snake_case tool names, and `obsidiai-` CSS classes. Match adjacent formatting; existing quote/indent styles vary.
-- Services receive `App`, approval controllers, catalogs, or lifecycle owners through constructors. Reuse these boundaries rather than adding alternate mutation paths or a second agent loop.
-- Define tools with pi-ai's `Type` schemas and sequential execution. Successful results use `{ content: [{ type: "text", text: JSON.stringify(details) }], details }`; failures throw safe errors. Never expose upstream token-bearing response bodies.
-- Preserve `AbortSignal` propagation, serialized settings/credential/plugin queues, idempotent prompt settlement, and lifecycle-owned event disposers. Whole-login cancellation and individual auth-prompt cancellation are distinct. Do not detach workspace leaves on plugin unload.
-- Validate tool paths through `validateVaultPath`; add extension checks at the caller. Note edits require a current-run `read_note` snapshot and synchronous identity/content/open-editor checks inside `Vault.process`. Attachments do not authorize edits. Preserve size limits and collision checks.
-- `list_files` traverses native folder children without reading bodies, bounded by depth/output/inspection limits. Continuation cursors are single-use, run-scoped, and capped; preserve explicit live-tree/depth/truncation caveats and cancellation. Hidden/config folders must not be traversed.
-- Treat metadata as revision-checked native-cache snapshots, not guaranteed current truth. Keep explicit pagination, partial/truncation status, and deterministic graph traversal. Skills remain vault-local, run-scoped, and instruction-only; `allowed-tools` grants no permissions.
-- Keep private `app.plugins` access inside the bridge. Distinguish installed, configured-enabled, and loaded states; fail unsupported capabilities explicitly. Never replace native lifecycle operations with filesystem deletion or direct writes to lifecycle configuration.
-- `PluginSettingsService` shares the lifecycle queue and lifetime. Inspect only an installed other community plugin's existing canonical `data.json`; keep raw snapshots and opaque instance identities private. Disclosure creates a revision bound to copied selected paths; writes require separate exact-diff approval, disclosed existing leaves or absent keys under existing object parents, and exact-byte checks inside `DataAdapter.process`. Reject stale files, manifests, instances, unsafe pointers, and oversized JSON. Recheck after native unload and after restoration; never overwrite unload-time saves. Preserve enabled/session-only/disabled intent when safe, finish restoration after mutation even on Stop, and report actual persistence/partial state without leaking undisclosed values or claiming schema validation or rollback.
+### Shared conventions
+
+- Use strict TypeScript, type-only imports, PascalCase classes, camelCase members, snake_case tool names, and `obsidiai-` CSS classes. Match adjacent formatting; quote/indent styles vary.
+- Inject `App`, catalogs, approval controllers, and lifecycle owners through constructors. Extend existing service boundaries rather than adding a second agent loop or UI-owned mutation path.
+- Define tools with pi-ai's `Type` schemas. Structured results use `{ content: [{ type: "text", text: JSON.stringify(details) }], details }`; throw safe errors for failures and report explicit partial/conflict outcomes where mutation may already have occurred.
+- Preserve `AbortSignal` propagation, serialized persistence/plugin queues, idempotent prompt settlement, and disposal/generation guards around async UI work. Release subscriptions/listeners on close; do not detach workspace leaves on plugin unload. Pi spreads `AuthInteraction`, so `AuthModal.prompt` and `notify` must remain own, bound callbacks.
+
+### Vault, metadata, and skills
+
+- Route vault-facing paths through `validateVaultPath`: visible vault-relative paths only; no traversal, hidden/config folders, absolute paths, or unsafe normalization. Apply caller-specific extension checks.
+- Note edits require a current-run `read_note` snapshot and synchronous identity/content/open-editor revalidation inside `Vault.process`. Attachments do not authorize edits. Creation requires an existing visible parent and no target collision; preserve content bounds and exact-replacement checks.
+- `list_files` traverses native children without reading bodies. Preserve bounded inspection/output, native ordering, run-scoped single-use cursors, cancellation, and explicit depth/truncation caveats.
+- Metadata/graph output is a revision-checked native-cache snapshot, not guaranteed current filesystem truth. Preserve pagination, partial/unindexed status, and deterministic traversal.
+- Skills are vault-local, run-scoped, untrusted instructions, never executable permissions. `allowed-tools` grants nothing; `user-invocable: false` forbids explicit invocation and `disable-model-invocation: true` requires it. Keep resource reads within the activated skill directory and revalidate captured snapshots.
+
+### Attachments and native UI
+
+- Keep original submitted text in the timeline; attachment bodies/images belong in model messages. `attachmentReferences` indexes those blocks without duplicating payloads; keep legacy `attachmentPaths` readable. Only note attachments provide Markdown source paths.
+- File selection, clipboard, and drag/drop share `attachment-input.ts`. Validate UTF-8/raster signatures and bounds; MIME or recognized extensions never bypass byte checks. Retain basenames, not computer directory paths; previews are in-memory raw text/raster images, without temporary files. Limits: 200k text characters, 5 MiB/image, 20 attachments and 20 MiB total per message.
+- Preserve draft inputs on failures, reject image-incompatible models before consuming drafts, and guard late reads with attachment epochs. Open-note auto-attachment defaults off; capture current editor/disk snapshots on Send, prefer manual attachments, and discard failed automatic snapshots.
+- `ComposerSuggest` owns `@`/`/` keyboard selection: preserve IME, caret, async guards, and Enter-to-select before Send. Ctrl/Cmd-click interception is timeline-scoped and opens internal links/embeds with native `openLinkText(..., "tab", sourcePath)`; ordinary links retain native behavior.
+
+### Community plugins and settings
+
+- Keep private `app.plugins` access inside `src/plugins/bridge.ts`. Distinguish installed, configured-enabled, and loaded state; fail unsupported capabilities explicitly. Use native lifecycle operations, never filesystem deletion or direct lifecycle-config writes.
+- Resolve official-registry/exact releases, obtain approval, then revalidate before mutation. Plugins are unsandboxed code. Once native mutation starts, cancellation is not rollback: finish safe restoration and report observed persistence/partial state.
+- `PluginSettingsService` shares the lifecycle queue/lifetime and inspects only another installed plugin's existing canonical `data.json`. Keep raw bytes and instance identities private. Disclosure requires explicitly selected fields; edits require separate exact-diff approval and a revision bound to that disclosure.
+- Preserve bounded JSON-pointer policy, disclosed existing leaves/absent keys under existing object parents, and exact-byte checks inside `DataAdapter.process`. Recheck manifests, instances, and bytes after unload/restoration; never overwrite unload-time saves. Preserve enabled/session-only/disabled intent when safe, without claiming schema validation or rollback.
 
 ## Important Files
 
-- `src/settings.ts`: non-secret settings schema and shared `renderProviderSettings` used by both settings surfaces.
-- `src/vault/paths.ts`, `src/ui/approval.ts`: shared path and single-pending-approval contracts.
-- `src/plugins/bridge.ts`, `src/plugins/registry.ts`: private-manager feature checks and official-registry/exact-release validation.
-- `src/plugins/settings.ts`, `settings-data.ts`, `settings-types.ts`: selected-value disclosure receipts, bounded JSON patch policy, and approved native restart/restoration.
-- `manifest.json`, `versions.json`, `tsconfig.json`, `esbuild.config.mjs`, `package.json`, `package-lock.json`: compatibility, compilation, bundling, and reproducible tooling. Root `main.js` is generated and ignored; never hand-edit it.
+- `src/main.ts`, `src/agent/controller.ts`: lifecycle composition and conversation state authority.
+- `src/settings.ts`: non-secret settings and shared `renderProviderSettings` for both settings surfaces; persist preferred thinking effort and apply the model-supported effective level without resetting chat.
+- `src/vault/paths.ts`, `src/ui/approval.ts`: shared path and approval contracts.
+- `src/plugins/bridge.ts`, `registry.ts`, `settings.ts`, `settings-data.ts`, `settings-types.ts`: native capability checks, release validation, disclosure receipts, bounded patches, and restoration.
+- `src/agent/node-fetch.ts`, `esbuild.config.mjs`: host-compatible transport and bundle transforms.
+- `package.json`, `package-lock.json`, `tsconfig.json`: authoritative scripts, exact dependencies, strict source/test checking.
+- `manifest.json`, `versions.json`, `scripts/check-release.mjs`: plugin compatibility and release consistency. Root `main.js` is generated/ignored; never hand-edit it.
 
 ## Runtime/Tooling Preferences
 
-Use **Node >=22.19.0 and npm**, not Bun as a substitute. Obsidian API >=1.11.4 and its installer's embedded Node version are separate requirements. Keep dependencies exact-pinned and update the npm lockfile with dependency changes.
+Use **Node >=22.19.0 and npm**, not Bun as a substitute. CI tests Node 22.19.0 and 24; no npm version is pinned. Obsidian API >=1.11.4 and its installer's embedded Node version are separate requirements. Keep dependencies exact-pinned and update the npm lockfile with dependency changes.
 
-TypeScript performs no emission; esbuild produces Node/CommonJS ES2022 output and lowers dynamic imports. Bundle application dependencies, leaving Obsidian/Electron, host CodeMirror/Lezer modules, and Node built-ins external. Preserve lazy undici initialization and lexical `fetch`/`globalThis.fetch` injection. The Undici-only build transform binds Node timers, performance, and web streams: renderer timers lack `.unref()`, DOM performance lacks `markResourceTiming`, and DOM streams can stall Node HTTP response bodies and cancellation. Do not mutate the host's fetch, timers, streams, performance, or shared dispatcher. Google/Bedrock deliberately omit the explicit custom-fetch option.
+TypeScript does not emit; esbuild produces Node/CommonJS ES2022 output and lowers dynamic imports. Bundle application dependencies but leave Obsidian/Electron, host CodeMirror/Lezer modules, and Node built-ins external.
+
+Preserve lazy Undici initialization and lexical `fetch`/`globalThis.fetch` injection. The Undici-only transform supplies Node timers, performance, and web streams because renderer globals are incompatible with Node HTTP streaming/cancellation. Do not mutate the host's fetch, timers, streams, performance, or shared dispatcher. Google/Bedrock intentionally omit the explicit custom-fetch option.
 
 ## Testing & QA
 
-Vitest tests use narrow `vi.mock('obsidian', ...)` boundaries and in-memory fixtures. Follow `tests/vault-tools.test.ts` and `tests/agent-controller.test.ts` for real Agent loops with pi `fauxProvider`, `fauxAssistantMessage`, and `fauxToolCall`; no credentials or paid requests are needed.
-
-Assert observable bytes, tool outcomes, cancellation settlement, credential consistency, cache completeness, and installed/enabled/loaded state. Drive approvals with promise gates/subscriptions rather than arbitrary sleeps. Cover stale state, rejection, abort, late clicks, and partial native failures when changing mutation policy.
-
-Run the affected suite, then `npm run build`, `npm test`, and `npm run check:release`. GitHub Actions repeats checks on Node 22.19.0 and Node 24; release tags must exactly match the package/lockfile/manifest version without a `v` prefix. Update `versions.json` and `.github/release-notes/<version>.md` for each release. Keep third-party actions pinned to full commit SHAs and write permissions confined to publication. No coverage thresholds or checked-in native/packaged smoke runner exists. Mocked tests do **not** verify native UI, actual private-manager effects, or provider SDK packaging; separately exercise isolated bundles and a disposable Obsidian host and report unavailable host/account checks explicitly.
+- Vitest uses narrow `vi.mock('obsidian', ...)` boundaries and fresh in-memory fixtures. Follow `tests/vault-tools.test.ts` and `tests/agent-controller.test.ts` for real Agent loops using pi's faux provider/messages/tool calls; no paid requests or credentials are needed. Reuse `tests/fixtures/knowledge.ts` for metadata/graph behavior.
+- Assert observable bytes, tool outcomes, cancellation settlement, credential consistency, cache completeness, and installed/enabled/loaded state. Use promise gates/subscriptions or observable-state waits, not arbitrary sleeps. Mutation changes need rejection, stale-state, abort, late-click, and partial-failure cases; settle pending work and dispose fixtures.
+- For code changes, run the affected suite, then `npm run build`, `npm test`, and `npm run check:release`. No coverage threshold is configured. `tests/node-fetch.test.mjs` additionally exercises a built transport module with browser-like VM globals and a real localhost HTTP stream.
+- Mocks and VM checks do **not** verify native UI, actual private-manager effects, real OAuth/providers, or complete provider SDK packaging. Exercise changed host boundaries in a disposable Obsidian installation and isolated bundles as appropriate; report unavailable host/account checks explicitly.
+- Releases must align package/lockfile/manifest versions, `versions.json`, and `.github/release-notes/<version>.md`; tags are exact numeric versions without a `v` prefix. CI validates built assets; publication packages the tested Node 24 artifact (`main.js`, `manifest.json`, `styles.css`) rather than rebuilding. Keep third-party actions SHA-pinned and write permissions confined to publication. See `docs/DEVELOPMENT.md` for the release procedure; use metadata rather than hard-coded README ZIP examples as version authority.
