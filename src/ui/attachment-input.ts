@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { MAX_IMAGE_BYTES, MAX_TEXT_CHARACTERS, type AttachmentInput, type ImageMime } from "../agent/attachments";
+import { extractPdfText, MAX_PDF_BYTES } from "./pdf-input";
 
 const TEXT_EXTENSIONS = new Set([
  "txt", "text", "md", "markdown", "mdown", "mdx", "rst", "adoc", "csv", "tsv", "json", "jsonc", "jsonl", "ndjson", "yaml", "yml", "toml", "log",
@@ -19,7 +20,7 @@ const GENERIC_MIMES: Readonly<Record<string, true>> = { "": true, "application/o
 const NAMED_TEXT_FILES: Readonly<Record<string, true>> = { dockerfile: true, containerfile: true, makefile: true, gnumakefile: true, "cmakelists.txt": true, jenkinsfile: true, vagrantfile: true, gemfile: true, rakefile: true, procfile: true };
 
 export const FILE_ACCEPT = [
- "text/*", ...TEXT_MIMES, ...Object.values(IMAGE_EXTENSIONS),
+ "application/pdf", ".pdf", "text/*", ...TEXT_MIMES, ...Object.values(IMAGE_EXTENSIONS),
  ...Array.from(TEXT_EXTENSIONS, extension => `.${extension}`), ...Object.keys(IMAGE_EXTENSIONS).map(extension => `.${extension}`)
 ].filter((value, index, values) => values.indexOf(value) === index).join(",");
 
@@ -51,9 +52,19 @@ export async function readAttachmentFile(file: File): Promise<AttachmentInput> {
  const mime = file.type.split(";", 1)[0]!.trim().toLowerCase();
  const declaredImage = mime.startsWith("image/") || Object.hasOwn(IMAGE_EXTENSIONS, extension);
  const fail = (message: string): never => { throw new Error(message); };
- if (file.size > Math.max(MAX_IMAGE_BYTES, MAX_TEXT_CHARACTERS * 3 + 3)) fail("File is too large to attach.");
+ const declaredPdf = mime === "application/pdf" || extension === "pdf";
+ if (file.size > MAX_PDF_BYTES) fail("Files must be 20 MiB or smaller.");
+ const header = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+ const pdfSignature = header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46 && header[4] === 0x2d;
+ if (declaredPdf || pdfSignature) {
+  if (!pdfSignature) fail("Invalid PDF: the file does not have a PDF signature.");
+  if ((!Object.hasOwn(GENERIC_MIMES, mime) && mime !== "application/pdf") || (extension && extension !== "pdf")) {
+   fail("PDF bytes do not match the file type or filename extension.");
+  }
+  return { kind: "text", path, content: await extractPdfText(new Uint8Array(await file.arrayBuffer())) };
+ }
  if (declaredImage && file.size > MAX_IMAGE_BYTES) fail("Images must be 5 MiB or smaller.");
- const signature = imageSignature(new Uint8Array(await file.slice(0, 12).arrayBuffer()));
+ const signature = imageSignature(header);
  if (signature || declaredImage) {
   if (!signature) fail("Unsupported or invalid image. Choose PNG, JPEG, WebP, or GIF.");
   if (file.size > MAX_IMAGE_BYTES) fail("Images must be 5 MiB or smaller.");
@@ -67,7 +78,7 @@ export async function readAttachmentFile(file: File): Promise<AttachmentInput> {
  const textMime = mime.startsWith("text/") || TEXT_MIMES.has(mime);
  const textName = TEXT_EXTENSIONS.has(extension) || Object.hasOwn(NAMED_TEXT_FILES, name) || (!extension && Object.hasOwn(GENERIC_MIMES, mime));
  // Some platforms classify .ts source as video/mp2t; decoded bytes still must be valid text.
- if (!textMime && !textName) fail("Unsupported file type. Choose a UTF-8 text file or PNG, JPEG, WebP, or GIF image.");
+ if (!textMime && !textName) fail("Unsupported file type. Choose a PDF, UTF-8 text file, or PNG, JPEG, WebP, or GIF image.");
  let content: string;
  try {
   // Fatal decoding rejects malformed UTF-8; the decoder consumes an optional UTF-8 BOM.

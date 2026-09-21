@@ -26,7 +26,7 @@ Ask questions across your notes, discover connections, and turn a conversation i
 ## What you can do
 
 - **Find answers in your vault.** Search notes, tags, and properties; explore backlinks and paths between ideas.
-- **Bring the right context.** Attach notes, text files, or images. Drag and drop, paste screenshots, or include your open notes.
+- **Bring the right context.** Attach notes, text files, PDFs, or images. Drag and drop, paste screenshots, or include your open notes.
 - **Choose your models.** Keep multiple providers connected, switch models, and adjust supported thinking effort.
 - **Make reviewed changes.** Create or edit notes, manage community plugins, and review exact plugin-setting changes before saving.
 - **Reuse your workflows.** Apply Markdown skills with `/`, and add notes or folders with `@`.

@@ -76,15 +76,17 @@ Automatic context is captured anew for each message; exclusions reset after subm
 
 Type `/` at the start of a draft to choose a skill. Selection inserts `/skill:name `; add arguments and then send. It does not submit the prompt automatically. Escape dismisses suggestions; Shift+Enter inserts a newline.
 
-### Computer files, images, and pasted text
+### Computer files, PDFs, images, and pasted text
 
-Use **Attach files from computer** beside **Attach note** to select multiple files, or **drag and drop files onto the chat**. Supported inputs include UTF-8 text, Markdown, CSV/TSV, JSON/YAML/TOML, logs, common source/config files, and **PNG, JPEG, WebP, or GIF images**. Clipboard images can also be pasted directly into the composer. Binary documents and other text encodings are not converted.
+Use **Attach files from computer** beside **Attach note** to select multiple files, or **drag and drop files onto the chat**. Supported inputs include UTF-8 text, Markdown, CSV/TSV, JSON/YAML/TOML, logs, common source/config files, **PDF documents**, and **PNG, JPEG, WebP, or GIF images**. Clipboard files and images can also be pasted directly into the composer. Other binary documents and text encodings are not converted.
+
+**PDFs:** embedded text is extracted locally, in page order, and attached as text under the original PDF filename. The preview shows that extracted text, not rendered PDF pages; only the extracted text is sent to the model and retained in history. PDF images, annotations, and visual layout are not included, and complex columns/tables may not preserve reading order. There is no OCR: scanned or image-only PDFs without extractable text are rejected. Damaged and password-protected PDFs may also be rejected. PDF text works with text-only models.
 
 Pastes of **4,000 characters or 40 lines** become a temporary `.txt` attachment instead of filling the composer. Short pastes remain normal text. Existing draft text outside the selected range is preserved. These attachments are in-memory snapshots, not new vault notes or files written into an operating-system temporary folder.
 
 Click a draft or newly sent attachment chip to preview its full text or image; use the separate **×** button to remove a draft attachment. Text previews display raw content without executing HTML or rendering embedded resources. Sent previews remain available after reopening saved history. You can send attachments without an accompanying typed prompt.
 
-**Limits:** 200,000 characters per text attachment, 5 MiB per image, at most 20 attachments and 20 MiB of total attachment data per message. Files are not silently truncated. Unsupported files and size-limit failures are reported; successfully attached files remain in the draft. Images are submitted as actual image inputs and require a model advertising image support. Switching an image-containing conversation to a text-only model blocks Send rather than silently dropping the images.
+**Limits:** 200,000 characters per text attachment (including extracted PDF text), 5 MiB per image, 20 MiB and 500 pages per input PDF, at most 20 attachments and 20 MiB of total attachment data per message. The total counts extracted text, not original PDF bytes. Files are not silently truncated. Unsupported files and size-limit failures are reported; successfully attached files remain in the draft. Images are submitted as actual image inputs and require a model advertising image support. Switching an image-containing conversation to a text-only model blocks Send rather than silently dropping the images.
 
 **Privacy:** nothing is uploaded merely by selecting, dropping, or pasting. Only the external filename—not its computer directory—is retained. On Send, attachment contents go to the selected provider and are stored in the plugin’s unencrypted chat history. An image preview does not imply that a remote vision provider has been verified.
 

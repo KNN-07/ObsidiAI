@@ -246,7 +246,7 @@ export class AgentView extends ItemView {
   const actions = composer.createDiv({ cls: "obsidiai-composer-actions" });
   const contextActions = actions.createDiv({ cls: "obsidiai-context-actions" });
   this.iconButton(contextActions, "Attach note", "paperclip", () => this.attachNote());
-  this.fileInput = composer.createEl("input", { type: "file", attr: { accept: FILE_ACCEPT, multiple: "", "aria-label": "Choose text files or images" } });
+  this.fileInput = composer.createEl("input", { type: "file", attr: { accept: FILE_ACCEPT, multiple: "", "aria-label": "Choose text files, PDFs, or images" } });
   this.fileInput.hidden = true;
   this.fileButton = this.iconButton(contextActions, "Attach files from computer", "file-up", () => {
    if (!this.canAttach()) return;
@@ -282,8 +282,8 @@ export class AgentView extends ItemView {
   this.stopButton = this.iconButton(modelActions, "Stop generation", "square", () => { void controller.stop(); });
   this.stopButton.buttonEl.addClass("obsidiai-stop");
   this.disclosure = composeRegion.createEl("p", { cls: "obsidiai-disclosure" });
-  composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Drop text files or images · Paste images or long text · @ notes · / skills · Enter to send" });
-  this.dropHint = stage.createDiv({ cls: "obsidiai-drop-hint", text: "Drop text files or images to attach", attr: { role: "status" } }); this.dropHint.hidden = true;
+  composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Drop text files, PDFs, or images · Paste images or long text · @ notes · / skills · Enter to send" });
+  this.dropHint = stage.createDiv({ cls: "obsidiai-drop-hint", text: "Drop text files, PDFs, or images to attach", attr: { role: "status" } }); this.dropHint.hidden = true;
   this.registerDomEvent(this.contentEl, "dragenter", event => {
    if (!event.dataTransfer?.types.includes("Files")) return;
    event.preventDefault(); event.stopPropagation(); this.dragDepth++;

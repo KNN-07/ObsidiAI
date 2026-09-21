@@ -1,6 +1,6 @@
 {
   "name": "obsidiai",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -14,7 +14,8 @@
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
     "diff": "8.0.4",
-    "undici": "8.10.2"
+    "undici": "8.10.2",
+    "unpdf": "1.8.1"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
