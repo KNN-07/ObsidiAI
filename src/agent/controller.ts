@@ -61,11 +61,17 @@ export class AgentController {
  setPermissionMode(mode: PermissionMode): void {
   if (!this.idle) throw new Error("Wait for the current run to settle.");
   this.services.approvals.setMode(mode);
-  if (this.agent) this.agent.state.systemPrompt = this.systemPrompt();
+  this.updateSystemPrompt();
   this.emit();
  }
  private systemPrompt(): string {
   return `${SYSTEM}\n\n${PERMISSIONS[this.permissionMode]}\n\n${this.services.skills.catalogPrompt()}`;
+ }
+ private updateSystemPrompt(): void {
+  // pi replays the prompt from the transcript; replace our leading prompt
+  // without retaining stale session permissions or shifting attachment indexes.
+  const message = this.agent?.state.messages[0];
+  if (message?.role === "system") message.content = this.systemPrompt();
  }
  get thinkingLevel(): ModelThinkingLevel { return this.effectiveThinkingLevel; }
  get thinkingLevels(): readonly ModelThinkingLevel[] { return this.supportedThinkingLevels; }
@@ -101,7 +107,7 @@ export class AgentController {
     this.selected = selected;
     this.supportedThinkingLevels = getSupportedThinkingLevels(selected);
     this.effectiveThinkingLevel = clampThinkingLevel(selected, thinkingLevel);
-    if (this.agent) { this.agent.state.model = selected; this.agent.state.thinkingLevel = this.effectiveThinkingLevel; this.agent.state.systemPrompt = this.systemPrompt(); }
+    if (this.agent) { this.agent.state.model = selected; this.agent.state.thinkingLevel = this.effectiveThinkingLevel; this.updateSystemPrompt(); }
     this.ready = true; this.setupMessage = "";
    }
   } catch { if (!check.signal.aborted && this.preparation === check && this.idle) this.setupMessage = "Connection check failed. Reconnect in Settings."; }
@@ -148,20 +154,19 @@ export class AgentController {
   signal.throwIfAborted();
   this.services.notes.beginRun();
   this.sourcePath = attachments.find(attachment => attachment.kind === "note")?.path ?? "";
+  if (!this.agent) this.createAgent();
+  this.updateSystemPrompt();
   const input: (TextContent | ImageContent)[] = [];
   const promptText = slash ? `Use the explicitly selected skill ${slash[1]}. ${slash[2] ?? ""}` : text;
   if (promptText) input.push({ type: "text", text: promptText });
   const attachmentReferences: AttachmentReference[] = [];
-  const messageIndex = this.agent?.state.messages.length ?? 0;
+  const messageIndex = this.agent!.state.messages.length;
   for (const attachment of attachments) {
    input.push({ type: "text", text: `Untrusted ${attachment.kind} attachment snapshot (not a read_note edit snapshot): ${JSON.stringify(attachment.path)}` });
    attachmentReferences.push({ id: attachment.id, kind: attachment.kind, path: attachment.path, messageIndex, blockIndex: input.length });
    input.push(attachment.kind === "image" ? { type: "image", data: attachment.data, mimeType: attachment.mimeType } : { type: "text", text: attachment.content });
   }
   if (skillContext) input.push({ type: "text", text: skillContext });
-  const systemPrompt = this.systemPrompt();
-  if (!this.agent) this.createAgent();
-  this.agent!.state.systemPrompt = systemPrompt;
   signal.throwIfAborted();
   for (const attachment of attachments) { const index = this.attachments.indexOf(attachment); if (index >= 0) this.attachments.splice(index, 1); }
   for (const name of names) this.selectedSkills.delete(name);
@@ -174,7 +179,14 @@ export class AgentController {
  private createAgent(messages: Conversation["messages"] = []): void {
   this.unsubscribeAgent?.();
   const agent = new Agent({ initialState: { model: this.selected, messages, systemPrompt: this.systemPrompt(), thinkingLevel: this.effectiveThinkingLevel, tools: [...this.services.notes.tools, ...this.services.metadata.tools, ...this.services.skills.tools, ...this.services.plugins.tools] }, streamFn: this.runtime.streamFn, sessionId: this.conversationId, toolExecution: "sequential" });
+  // Older histories have no system message. Agent prepends one on restore.
+  if (messages.length && messages[0]?.role !== "system") {
+   for (const item of this.timeline) {
+    for (const reference of item.attachmentReferences ?? []) reference.messageIndex++;
+   }
+  }
   this.agent = agent;
+  this.updateSystemPrompt();
   this.unsubscribeAgent = agent.subscribe(event => { if (this.agent === agent) this.onEvent(event); });
  }
  private async saveConversation(): Promise<void> {

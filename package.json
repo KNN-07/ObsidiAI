@@ -1,6 +1,6 @@
 {
   "name": "obsidiai",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "license": "MIT",
   "scripts": {
@@ -11,8 +11,8 @@
     "check:release": "node scripts/check-release.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-agent-core": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
     "diff": "8.0.4",
     "undici": "8.10.2",
     "unpdf": "1.8.1"
@@ -22,6 +22,7 @@
     "esbuild": "0.28.2",
     "obsidian": "1.13.1",
     "typescript": "7.0.2",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "yaml": "2.9.1"
   }
 }

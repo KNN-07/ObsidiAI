@@ -34,6 +34,8 @@ Open the test vault in Obsidian, enable community plugins if needed, and enable 
 
 Provider availability is not a promise of account access. Subscription eligibility, provider policy, credentials, and network conditions still apply. Graph and metadata results identify partial or provisional cache state rather than treating it as definitive vault truth.
 
+Most built-in model catalogs ship inside the plugin rather than loading live from the provider. Update ObsidiAI and reload Obsidian (or disable/re-enable the plugin after the current run settles) to receive newly bundled models. **Refresh models** updates only providers with dynamic catalogs; it does not update static built-in lists. Available choices still depend on your connected provider and account.
+
 NVIDIA can advertise models whose inference endpoint returns **HTTP 404** for the current account. This is different from an authentication failure; choose another model. A native request to `openai/gpt-oss-20b` succeeded during verification, while some other advertised models returned 404. **0.1.2** fixes a renderer/Node networking incompatibility that caused “Connection error” or stalled streams inside Obsidian.
 
 ### Connect and start a conversation

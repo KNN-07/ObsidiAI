@@ -51,8 +51,11 @@ describe("real Agent conversation settlement", () => {
   next.controller.runtime.streamFn = (model, value, options) => { context = value; return stream(model, value, options); };
   // Reopen binds the capturing stream to a fresh real Agent.
   await next.controller.openConversation(saved!.id);
-  next.faux.setResponses([fauxAssistantMessage("I remember.")]);
-  await next.controller.send("What changed?");
+  next.faux.setResponses([fauxAssistantMessage(fauxToolCall("approved_edit", {})), fauxAssistantMessage("I remember.")]);
+  const resumed = next.controller.send("What changed?");
+  await next.approvalReady;
+  expect(next.content()).toBe("Status: draft");
+  next.approve(); await resumed;
   expect(context?.messages.some(m => m.role === "toolResult")).toBe(true);
   expect(context?.messages.some(m => m.role === "assistant" && m.content.some(c => c.type === "toolCall"))).toBe(true);
   await next.controller.deleteConversations([saved!.id]);
@@ -238,6 +241,29 @@ describe("real Agent conversation settlement", () => {
   }]);
   await next.controller.send("Continue.");
   expect(next.controller.timeline.filter(t => t.kind === "user").at(-1)).toMatchObject({ text: "Continue." });
+  await next.controller.dispose();
+ });
+ it("migrates pre-system-message histories without losing attachment previews on repeated reload", async () => {
+  const legacy = {
+   id: "legacy", title: "Old chat", createdAt: 1, updatedAt: 1, providerId: "faux", modelId: "faux",
+   messages: ["First snapshot", "Second snapshot"].map(text => ({ role: "user", content: [{ type: "text", text }], timestamp: 1 })),
+   timeline: ["First snapshot", "Second snapshot"].map((text, index) => ({
+    id: `user-${index}`, kind: "user", text: "", complete: true, sourcePath: "",
+    attachmentReferences: [{ id: `attachment-${index}`, kind: "text", path: `${index}.txt`, messageIndex: index, blockIndex: 0 }],
+   })),
+  };
+  let bytes = JSON.stringify({ version: 1, conversations: [legacy] });
+  const adapter = { async exists() { return true; }, async read() { return bytes; }, async write(_path: string, value: string) { bytes = value; } };
+  const first = fixture({}, new HistoryStore(adapter, "history.json")); await first.configure();
+  await first.controller.openConversation("legacy");
+  expect(first.controller.timeline.filter(item => item.kind === "user").flatMap(item => first.controller.getSentAttachments(item)).map(item => item.kind !== "image" && item.content)).toEqual(["First snapshot", "Second snapshot"]);
+  first.controller.addAttachment({ kind: "text", path: "new.txt", content: "New snapshot" });
+  first.faux.setResponses([fauxAssistantMessage("Continued.")]);
+  await first.controller.send("Continue");
+  await first.controller.dispose();
+  const next = fixture({}, new HistoryStore(adapter, "history.json"));
+  await next.controller.openConversation("legacy");
+  expect(next.controller.timeline.filter(item => item.kind === "user").flatMap(item => next.controller.getSentAttachments(item)).map(item => item.kind !== "image" && item.content)).toEqual(["First snapshot", "Second snapshot", "New snapshot"]);
   await next.controller.dispose();
  });
  it("sends attachment-only images as real image content and restores previews before model setup", async () => {
