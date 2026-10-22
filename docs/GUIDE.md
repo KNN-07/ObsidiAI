@@ -80,7 +80,7 @@ Type `/` at the start of a draft to choose a skill. Selection inserts `/skill:na
 
 ### Computer files, PDFs, images, and pasted text
 
-Use **Attach files from computer** beside **Attach note** to select multiple files, or **drag and drop files onto the chat**. Supported inputs include UTF-8 text, Markdown, CSV/TSV, JSON/YAML/TOML, logs, common source/config files, **PDF documents**, and **PNG, JPEG, WebP, or GIF images**. Clipboard files and images can also be pasted directly into the composer. Other binary documents and text encodings are not converted.
+Use **+ → Upload from computer** in the composer to select multiple files, or **drag and drop files onto the chat**. Supported inputs include UTF-8 text, Markdown, CSV/TSV, JSON/YAML/TOML, logs, common source/config files, **PDF documents**, and **PNG, JPEG, WebP, or GIF images**. Clipboard files and images can also be pasted directly into the composer. Other binary documents and text encodings are not converted.
 
 **PDFs:** embedded text is extracted locally, in page order, and attached as text under the original PDF filename. The preview shows that extracted text, not rendered PDF pages; only the extracted text is sent to the model and retained in history. PDF images, annotations, and visual layout are not included, and complex columns/tables may not preserve reading order. There is no OCR: scanned or image-only PDFs without extractable text are rejected. Damaged and password-protected PDFs may also be rejected. PDF text works with text-only models.
 
