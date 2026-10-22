@@ -1,7 +1,10 @@
 .obsidiai-agent {
  --obsidiai-accent: #c07856;
  --obsidiai-column: 760px;
+ --obsidiai-on-accent: #fff;
+ --obsidiai-user-bubble: color-mix(in srgb, var(--background-secondary) 70%, var(--background-modifier-border));
  container: obsidiai / inline-size;
+ position: relative;
  display: flex;
  flex-direction: column;
  height: 100%;
@@ -92,25 +95,29 @@
 .obsidiai-welcome { width: min(100% - 48px, var(--obsidiai-column)); margin: 0 auto; padding: 28px 0 24px; text-align: center; }
 .obsidiai-hero-mark { display: flex; justify-content: center; margin-bottom: 18px; color: var(--obsidiai-accent); }
 .obsidiai-hero-mark svg { width: 56px; height: 56px; }
-.obsidiai-welcome h1, .obsidiai-unavailable h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(28px, 4.5cqi, 42px); font-weight: 400; line-height: 1.2; letter-spacing: -.035em; }
-.obsidiai-welcome-copy { margin: 12px 0 28px; font-size: 14px; line-height: 1.5; color: var(--text-muted); }
-.obsidiai-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; text-align: left; }
-.obsidiai-agent button.obsidiai-suggestion { display: flex; align-items: flex-start; gap: 10px; height: auto; min-height: 76px; padding: 16px 14px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: transparent; box-shadow: none; text-align: left; white-space: normal; }
-.obsidiai-agent button.obsidiai-suggestion:hover { background: var(--background-secondary); border-color: var(--background-modifier-border-hover); }
-.obsidiai-suggestion-icon { display: flex; flex-shrink: 0; padding-top: 2px; color: var(--text-muted); }
-.obsidiai-suggestion-icon svg { width: 16px; height: 16px; }
-.obsidiai-suggestion-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.obsidiai-suggestion-title { font-size: 12px; font-weight: 500; color: var(--text-normal); }
-.obsidiai-suggestion-detail { font-size: 11px; line-height: 1.3; color: var(--text-muted); }
+.obsidiai-welcome h1, .obsidiai-unavailable h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(28px, 4.5cqi, 40px); font-weight: 400; line-height: 1.2; letter-spacing: -.03em; }
+.obsidiai-welcome h1.obsidiai-greeting { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 14px; }
+.obsidiai-greeting-mark { display: flex; flex-shrink: 0; color: var(--obsidiai-accent); }
+.obsidiai-greeting-mark svg { width: 1.15em; height: 1.15em; }
+.obsidiai-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+.obsidiai-agent button.obsidiai-suggestion { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); box-shadow: none; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.obsidiai-agent button.obsidiai-suggestion:hover { background: var(--background-secondary); border-color: var(--background-modifier-border-hover); color: var(--text-normal); }
+.obsidiai-suggestion-icon { display: flex; flex-shrink: 0; }
+.obsidiai-suggestion-icon svg { width: 14px; height: 14px; }
 .obsidiai-compose-region { position: relative; flex-shrink: 0; width: min(100% - 48px, var(--obsidiai-column)); margin: 0 auto; padding-bottom: 14px; }
-.obsidiai-composer-card { padding: 14px 14px 10px; border: 1px solid var(--background-modifier-border); border-radius: 18px; background: var(--background-primary-alt, var(--background-primary)); box-shadow: 0 2px 8px rgb(0 0 0 / 4%); transition: border-color .15s, box-shadow .15s; }
-.obsidiai-composer-card:focus-within { border-color: var(--background-modifier-border-focus, var(--interactive-accent)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
-.obsidiai-agent textarea.obsidiai-composer { display: block; width: 100%; min-height: 64px; max-height: min(220px, 28vh); margin: 0; padding: 3px 3px 12px; resize: none; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--text-normal); font: inherit; font-size: 15px; line-height: 1.6; }
+.obsidiai-composer-card { padding: 14px 12px 10px 14px; border: 1px solid var(--background-modifier-border); border-radius: 20px; background: var(--background-primary-alt, var(--background-primary)); box-shadow: 0 4px 20px rgb(0 0 0 / 4%); transition: border-color .15s, box-shadow .15s; }
+.obsidiai-composer-card:hover { border-color: var(--background-modifier-border-hover, var(--background-modifier-border)); }
+.obsidiai-composer-card:focus-within { border-color: var(--background-modifier-border-hover, var(--background-modifier-border)); box-shadow: 0 4px 24px rgb(0 0 0 / 7%); }
+.obsidiai-agent textarea.obsidiai-composer { display: block; width: 100%; min-height: 52px; max-height: min(220px, 28vh); margin: 0; padding: 2px 2px 10px; resize: none; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--text-normal); font: inherit; font-size: 15px; line-height: 1.6; }
 .obsidiai-agent textarea.obsidiai-composer:focus { border: 0; box-shadow: none; outline: none; }
 .obsidiai-agent textarea.obsidiai-composer::placeholder { color: var(--text-faint); }
 .obsidiai-composer-actions, .obsidiai-context-actions, .obsidiai-model-actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .obsidiai-composer-actions { justify-content: space-between; gap: 12px; }
-.obsidiai-context-actions { flex-shrink: 0; }
+.obsidiai-context-actions { flex-shrink: 0; gap: 6px; }
+.obsidiai-model-actions { flex-shrink: 1; justify-content: flex-end; }
+.obsidiai-agent button.obsidiai-plus-button { position: relative; border: 1px solid var(--background-modifier-border); border-radius: 9px; }
+.obsidiai-agent button.obsidiai-plus-button[aria-expanded="true"] { background: var(--background-modifier-hover); color: var(--text-normal); }
+.obsidiai-plus-button[data-open-notes="true"]::after { content: ""; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--obsidiai-accent); }
 .obsidiai-agent button.obsidiai-text-button, .obsidiai-agent button.obsidiai-model-button, .obsidiai-agent button.obsidiai-thinking-button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 32px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--text-muted); font-size: 12px; }
 .obsidiai-agent button.obsidiai-text-button:hover:not(:disabled), .obsidiai-agent button.obsidiai-model-button:hover:not(:disabled), .obsidiai-agent button.obsidiai-thinking-button:hover:not(:disabled) { background: var(--background-modifier-hover); color: var(--text-normal); }
 .obsidiai-text-button > span, .obsidiai-model-button > span, .obsidiai-thinking-button > span { display: flex; }
@@ -118,14 +125,20 @@
 .obsidiai-thinking-button { flex-shrink: 0; white-space: nowrap; }
 .obsidiai-thinking-button:disabled { opacity: .55; }
 .obsidiai-permission-button { flex-shrink: 0; white-space: nowrap; }
+.obsidiai-agent button.obsidiai-permission-button { border: 1px solid var(--background-modifier-border); border-radius: 9px; }
 .obsidiai-agent button.obsidiai-permission-button[data-mode="auto-approve-notes"] { color: var(--text-warning); }
-.obsidiai-agent button.obsidiai-open-notes-button[aria-pressed="true"] { background: var(--background-modifier-hover); color: var(--text-accent); }
+.obsidiai-agent button.obsidiai-permission-button[data-mode="read-only"] { color: var(--text-accent); }
+.obsidiai-agent .obsidiai-composer-actions button[aria-expanded="true"] { background: var(--background-modifier-hover); color: var(--text-normal); }
 .obsidiai-model-button > span:first-child { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obsidiai-model-button > span:last-child { flex-shrink: 0; }
 .obsidiai-model-button svg { width: 13px; height: 13px; }
-.obsidiai-agent button.obsidiai-send, .obsidiai-agent button.obsidiai-stop { width: 34px; height: 34px; margin-left: 6px; border-radius: 9px; background: var(--text-normal); color: var(--background-primary); }
-.obsidiai-agent button.obsidiai-send:hover:not(:disabled), .obsidiai-agent button.obsidiai-stop:hover:not(:disabled) { background: var(--text-muted); color: var(--background-primary); }
-.obsidiai-agent button.obsidiai-send:disabled, .obsidiai-agent button.obsidiai-stop:disabled { opacity: .3; }
+.obsidiai-agent button.obsidiai-model-button { color: var(--text-normal); font-weight: 500; }
+.obsidiai-agent button.obsidiai-send, .obsidiai-agent button.obsidiai-stop { width: 32px; height: 32px; margin-left: 4px; border-radius: 9px; background: var(--obsidiai-accent); color: var(--obsidiai-on-accent); }
+.obsidiai-agent button.obsidiai-send:hover:not(:disabled), .obsidiai-agent button.obsidiai-stop:hover:not(:disabled) { background: color-mix(in srgb, var(--obsidiai-accent) 85%, black); color: var(--obsidiai-on-accent); }
+.obsidiai-agent button.obsidiai-send:disabled { opacity: .4; }
+.obsidiai-agent button.obsidiai-stop { background: var(--text-normal); color: var(--background-primary); }
+.obsidiai-agent button.obsidiai-stop:hover:not(:disabled) { background: var(--text-muted); color: var(--background-primary); }
+.obsidiai-agent button.obsidiai-stop:disabled { opacity: .3; }
 .obsidiai-stop svg { width: 13px; height: 13px; fill: currentColor; }
 .obsidiai-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 88px; margin-bottom: 10px; overflow-y: auto; }
 .obsidiai-agent button.obsidiai-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 8px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); box-shadow: none; color: var(--text-muted); font-size: 11px; }
@@ -153,7 +166,7 @@
 .obsidiai-message:last-child { margin-bottom: 0; }
 .obsidiai-message-body { white-space: pre-wrap; }
 .obsidiai-message-body, .obsidiai-tool-body { user-select: text; }
-.obsidiai-user { width: fit-content; max-width: 86%; margin-left: auto; padding: 12px 18px; border: 1px solid var(--background-modifier-border); border-radius: 16px 16px 4px 16px; background: var(--background-secondary); }
+.obsidiai-user { width: fit-content; max-width: 86%; margin-left: auto; padding: 10px 16px; border-radius: 16px; background: var(--obsidiai-user-bubble); }
 .obsidiai-sent-context { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .obsidiai-sent-attachment { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border: 1px solid var(--background-modifier-border); border-radius: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.4; text-decoration: none; }
 .obsidiai-agent button.obsidiai-sent-attachment { height: auto; background: transparent; box-shadow: none; text-align: left; }
@@ -161,12 +174,18 @@
 .obsidiai-sent-attachment > span:first-child { display: flex; flex-shrink: 0; }
 .obsidiai-sent-attachment > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obsidiai-sent-attachment svg { width: 13px; height: 13px; }
-.obsidiai-author { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; color: var(--text-muted); font-size: 11px; font-weight: 500; line-height: 1.4; }
-.obsidiai-author > span:first-child { display: flex; color: var(--obsidiai-accent); }
-.obsidiai-author svg { width: 22px; height: 22px; }
 .obsidiai-assistant { padding: 0 4px; }
+.obsidiai-message-footer { display: flex; align-items: center; gap: 2px; min-height: 28px; margin-top: 6px; margin-left: -6px; }
+.obsidiai-message-footer .obsidiai-assistant-logo { display: none; padding-left: 6px; color: var(--obsidiai-accent); }
+.obsidiai-message-footer .obsidiai-assistant-logo svg { width: 22px; height: 22px; }
+.obsidiai-assistant[data-streaming="true"] .obsidiai-assistant-logo { display: flex; }
+.obsidiai-agent button.obsidiai-copy-button { width: 28px; height: 28px; opacity: 0; }
+.obsidiai-copy-button svg { width: 14px; height: 14px; }
+.obsidiai-assistant:hover .obsidiai-copy-button, .obsidiai-agent .obsidiai-copy-button:focus-visible, .obsidiai-timeline > .obsidiai-assistant:last-child .obsidiai-copy-button { opacity: 1; }
+@media (hover: none) { .obsidiai-agent button.obsidiai-copy-button { opacity: 1; } }
 .obsidiai-assistant[data-streaming="true"] .obsidiai-message-body:empty::after { content: "Thinking…"; color: var(--text-muted); font-size: 13px; animation: obsidiai-thinking 1.6s ease-in-out infinite; }
-.obsidiai-assistant[data-streaming="true"] .obsidiai-assistant-logo { animation: obsidiai-thinking 1.6s ease-in-out infinite; }
+.obsidiai-assistant[data-streaming="true"] .obsidiai-assistant-logo { animation: obsidiai-spin-pulse 2.4s ease-in-out infinite; }
+@keyframes obsidiai-spin-pulse { 0% { transform: rotate(0) scale(1); opacity: .7; } 50% { transform: rotate(180deg) scale(.88); opacity: 1; } 100% { transform: rotate(360deg) scale(1); opacity: .7; } }
 .obsidiai-prose { white-space: normal; }
 .obsidiai-prose > :first-child { margin-top: 0; }
 .obsidiai-prose > :last-child { margin-bottom: 0; }
@@ -175,17 +194,18 @@
 .obsidiai-prose table { display: block; max-width: 100%; overflow-x: auto; font-size: 13px; }
 .obsidiai-prose img { max-width: 100%; }
 .obsidiai-prose blockquote { margin-inline: 0; padding-inline: 16px; border-left: 2px solid var(--background-modifier-border); color: var(--text-muted); }
-.obsidiai-tool-chain { margin-bottom: 24px; border: 1px solid var(--background-modifier-border); border-radius: 10px; font-size: 12px; }
-.obsidiai-chain-summary { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border-radius: 10px; list-style: none; cursor: pointer; color: var(--text-muted); }
+.obsidiai-tool-chain { margin-bottom: 24px; font-size: 12px; }
+.obsidiai-chain-summary { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; margin-left: -8px; padding: 6px 10px 6px 8px; border-radius: 8px; list-style: none; cursor: pointer; color: var(--text-muted); }
 .obsidiai-chain-summary::-webkit-details-marker { display: none; }
 .obsidiai-chain-summary:hover { background: var(--background-modifier-hover); }
 .obsidiai-chain-chevron { display: flex; flex-shrink: 0; }
 .obsidiai-chain-chevron svg { width: 14px; height: 14px; }
 .obsidiai-tool-chain[open] > .obsidiai-chain-summary .obsidiai-chain-chevron { transform: rotate(90deg); }
-.obsidiai-chain-label { flex: 1; font-weight: 500; }
-.obsidiai-chain-status { font-size: 11px; }
+.obsidiai-chain-label { font-weight: 500; }
+.obsidiai-chain-status { font-size: 11px; color: var(--text-faint); }
+.obsidiai-chain-status::before { content: "·"; margin-right: 8px; }
 .obsidiai-tool-chain[data-state="awaiting-approval"] > .obsidiai-chain-summary, .obsidiai-tool-chain[data-state="error"] > .obsidiai-chain-summary { color: var(--text-warning); }
-.obsidiai-chain-body { padding: 0 8px 8px; }
+.obsidiai-chain-body { margin: 6px 0 0 -1px; padding: 2px 0 2px 14px; border-left: 2px solid var(--background-modifier-border); }
 .obsidiai-chain-body > .obsidiai-tool { margin-bottom: 6px; }
 .obsidiai-chain-body > .obsidiai-tool:last-child { margin-bottom: 0; }
 .obsidiai-inline-approval { margin: 0 0 24px; padding: 16px; border: 1px solid var(--text-warning); border-radius: 10px; background: var(--background-primary-alt, var(--background-primary)); font-size: 12px; line-height: 1.6; }
@@ -229,20 +249,15 @@
  .obsidiai-status { font-size: 10px; }
  .obsidiai-timeline, .obsidiai-welcome, .obsidiai-compose-region { width: calc(100% - 28px); }
  .obsidiai-welcome { padding-top: 20px; padding-bottom: 20px; }
- .obsidiai-welcome h1 { font-size: 30px; }
- .obsidiai-welcome-copy { margin-bottom: 22px; font-size: 13px; }
+ .obsidiai-welcome h1 { font-size: 28px; }
+ .obsidiai-welcome h1.obsidiai-greeting { gap: 10px; }
  .obsidiai-suggestions { gap: 6px; }
- .obsidiai-agent button.obsidiai-suggestion { flex-direction: column; gap: 8px; min-height: 82px; padding: 11px 10px; }
- .obsidiai-suggestion-title { font-size: 11px; }
- .obsidiai-suggestion-detail { display: none; }
- .obsidiai-composer-card { padding: 12px 10px 8px; border-radius: 14px; }
- .obsidiai-composer-actions { flex-wrap: wrap; gap: 4px; }
- .obsidiai-model-actions { flex-basis: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
- .obsidiai-model-button { grid-column: 1; grid-row: 1; }
- .obsidiai-thinking-button { grid-column: 2; grid-row: 1; }
- .obsidiai-send, .obsidiai-stop { grid-column: 3; grid-row: 1; }
- .obsidiai-permission-button { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
- .obsidiai-agent button.obsidiai-model-button { flex: 1; justify-content: flex-start; padding-inline: 4px; font-size: 11px; }
+ .obsidiai-agent button.obsidiai-suggestion { padding-inline: 10px; font-size: 11px; }
+ .obsidiai-composer-card { padding: 12px 8px 8px 10px; border-radius: 16px; }
+ .obsidiai-composer-actions { gap: 4px; }
+ .obsidiai-permission-button .obsidiai-button-label { display: none; }
+ .obsidiai-agent button.obsidiai-permission-button { width: 32px; justify-content: center; padding: 0; }
+ .obsidiai-agent button.obsidiai-model-button { padding-inline: 6px; font-size: 11px; }
  .obsidiai-agent button.obsidiai-thinking-button { padding-inline: 5px; font-size: 11px; }
  .obsidiai-disclosure { font-size: 10px; }
  .obsidiai-message { font-size: 14px; }
@@ -252,9 +267,7 @@
 @container obsidiai (max-width: 320px) {
  .obsidiai-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
  .obsidiai-welcome h1 { font-size: 26px; }
- .obsidiai-suggestions { grid-template-columns: 1fr; }
- .obsidiai-agent button.obsidiai-suggestion { flex-direction: row; align-items: center; min-height: 38px; padding: 8px 10px; }
- .obsidiai-context-actions .obsidiai-text-button { padding-inline: 4px; }
+ .obsidiai-thinking-button .obsidiai-button-label { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .obsidiai-composer-card { transition: none; } }
 .obsidiai-diff { max-height: 55vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-monospace); }
@@ -275,6 +288,31 @@
 .obsidiai-settings-selection-status { color: var(--text-muted); font-size: 12px; }
 .obsidiai-settings-selection-status[role="alert"] { color: var(--text-error); }
 .obsidiai-composer-card { position: relative; }
+.obsidiai-popover { position: absolute; z-index: 30; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: var(--background-primary); box-shadow: 0 8px 30px rgb(0 0 0 / 12%), 0 1px 3px rgb(0 0 0 / 6%); color: var(--text-normal); animation: obsidiai-pop 120ms ease-out both; }
+.obsidiai-popover-search { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); }
+.obsidiai-popover-search > span { display: flex; }
+.obsidiai-popover-search svg { width: 14px; height: 14px; }
+.obsidiai-agent .obsidiai-popover-search input { flex: 1; min-width: 0; height: 22px; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--text-normal); font-size: 13px; outline: none; }
+.obsidiai-popover-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
+.obsidiai-popover-section + .obsidiai-popover-section { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--background-modifier-border); }
+.obsidiai-popover-heading { padding: 6px 8px 4px; color: var(--text-faint); font-size: 11px; font-weight: 500; }
+.obsidiai-agent button.obsidiai-popover-item { display: flex; align-items: center; gap: 10px; width: 100%; height: auto; min-height: 34px; padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; box-shadow: none; color: var(--text-normal); font-size: 13px; text-align: left; white-space: normal; }
+.obsidiai-agent button.obsidiai-popover-item:hover:not(:disabled), .obsidiai-agent button.obsidiai-popover-item:focus-visible { background: var(--background-modifier-hover); outline: none; }
+.obsidiai-agent button.obsidiai-popover-item:disabled { opacity: .45; }
+.obsidiai-popover-icon { display: flex; flex-shrink: 0; align-self: flex-start; padding-top: 2px; color: var(--text-muted); }
+.obsidiai-popover-icon svg { width: 15px; height: 15px; }
+.obsidiai-popover-copy { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.obsidiai-popover-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
+.obsidiai-popover-description { color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.obsidiai-popover-check { display: flex; flex-shrink: 0; color: var(--obsidiai-accent); }
+.obsidiai-popover-check svg { width: 15px; height: 15px; }
+.obsidiai-popover-switch { position: relative; flex-shrink: 0; width: 28px; height: 16px; border-radius: 8px; background: var(--background-modifier-border); transition: background-color 120ms ease; }
+.obsidiai-popover-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--background-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 20%); transition: transform 120ms ease; }
+.obsidiai-popover-item[aria-checked="true"] .obsidiai-popover-switch { background: var(--obsidiai-accent); }
+.obsidiai-popover-item[aria-checked="true"] .obsidiai-popover-switch::after { transform: translateX(12px); }
+.obsidiai-popover-status, .obsidiai-popover-empty, .obsidiai-popover-note { padding: 8px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.obsidiai-popover-note { padding-bottom: 4px; color: var(--text-faint); }
+@keyframes obsidiai-pop { from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: scale(1); } }
 .obsidiai-composer-suggest { position: absolute; z-index: 10; left: 0; right: 0; bottom: calc(100% + 8px); max-height: min(280px, 35vh); overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 4px; background: var(--background-primary); box-shadow: var(--shadow-s); }
 .obsidiai-composer-option { padding: 8px 10px; border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; cursor: pointer; }
 .obsidiai-composer-option[aria-selected="true"], .obsidiai-composer-option:hover { background: var(--background-modifier-hover); }

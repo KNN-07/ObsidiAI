@@ -12,6 +12,12 @@ export interface ObsidiAISettings {
  credentialSecretId: string;
  skillsFolder: string;
  autoAttachOpenNotes: boolean;
+ recentModels: { providerId: string; modelId: string }[];
+}
+export const RECENT_MODEL_LIMIT = 4;
+/** Returns the recent-model list with this selection first; callers persist and restore it with the selection. */
+export function withRecentModel(recent: readonly { providerId: string; modelId: string }[], providerId: string, modelId: string): { providerId: string; modelId: string }[] {
+ return [{ providerId, modelId }, ...recent.filter(entry => entry.providerId !== providerId || entry.modelId !== modelId)].slice(0, RECENT_MODEL_LIMIT);
 }
 export function loadSettings(data: unknown): ObsidiAISettings {
  const stored = data !== null && typeof data === "object" ? data as Partial<ObsidiAISettings> : {};
@@ -22,6 +28,8 @@ export function loadSettings(data: unknown): ObsidiAISettings {
   credentialSecretId: typeof stored.credentialSecretId === "string" && stored.credentialSecretId.length > 0 ? stored.credentialSecretId : `obsidiai-${crypto.randomUUID()}`,
   skillsFolder: typeof stored.skillsFolder === "string" ? stored.skillsFolder : "Skills",
   autoAttachOpenNotes: stored.autoAttachOpenNotes === true,
+  recentModels: Array.isArray(stored.recentModels) ? stored.recentModels.filter((entry): entry is { providerId: string; modelId: string } =>
+   entry !== null && typeof entry === "object" && typeof entry.providerId === "string" && typeof entry.modelId === "string").slice(0, RECENT_MODEL_LIMIT).map(({ providerId, modelId }) => ({ providerId, modelId })) : [],
  };
 }
 export interface SettingsHost {
@@ -235,10 +243,11 @@ export function renderProviderSettings(containerEl: HTMLElement, host: SettingsH
       dropdown.onChange(value => { void perform(async signal => {
        const fresh = await models.getAvailable(provider.id, { signal });
        if (host.isRunning() || host.settings.providerId !== provider.id || (value && !fresh.some(model => model.id === value))) throw new Error("Model selection unavailable");
-       const previousModel = host.settings.modelId;
+       const previousModel = host.settings.modelId, previousRecent = host.settings.recentModels;
        host.settings.modelId = value || null;
+       if (value) host.settings.recentModels = withRecentModel(previousRecent, provider.id, value);
        try { await host.saveSettings(); }
-       catch (error) { host.settings.modelId = previousModel; throw error; }
+       catch (error) { host.settings.modelId = previousModel; host.settings.recentModels = previousRecent; throw error; }
        await host.connectionChanged();
       }); });
      });

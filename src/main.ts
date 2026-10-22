@@ -86,7 +86,7 @@ export default class ObsidiAIPlugin extends Plugin implements AgentViewHost {
   } });
  }
  saveSettings(): Promise<void> {
-  const snapshot = { providerId: this.settings.providerId, modelId: this.settings.modelId, thinkingLevel: this.settings.thinkingLevel, credentialSecretId: this.settings.credentialSecretId, skillsFolder: this.settings.skillsFolder, autoAttachOpenNotes: this.settings.autoAttachOpenNotes };
+  const snapshot = { providerId: this.settings.providerId, modelId: this.settings.modelId, thinkingLevel: this.settings.thinkingLevel, credentialSecretId: this.settings.credentialSecretId, skillsFolder: this.settings.skillsFolder, autoAttachOpenNotes: this.settings.autoAttachOpenNotes, recentModels: this.settings.recentModels.map(entry => ({ ...entry })) };
   const next = this.saveQueue.then(() => this.saveData(snapshot)); this.saveQueue = next.catch(() => undefined); return next;
  }
  isRunning(): boolean { return this.controller !== null && !this.controller.idle; }

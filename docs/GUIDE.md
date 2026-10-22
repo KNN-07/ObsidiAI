@@ -44,9 +44,9 @@ NVIDIA can advertise models whose inference endpoint returns **HTTP 404** for th
 2. Under **Add / manage provider**, choose a provider and connect using one of its advertised authentication methods. Repeat for additional providers; each keeps its own login. Ambient-only providers show setup guidance instead of a login button.
 3. Inspect **Saved provider logins** to manage or disconnect individual providers. Adding a login does not select a billable model or change the current chat selection.
 4. Run **ObsidiAI: Open agent tab** from the command palette, or use the notebook ribbon icon.
-5. Click the model control inside the composer and search across available providers and models. Use **Refresh models** in Settings when a dynamic catalog needs updating.
-6. Use the brain-icon **thinking effort** control to choose a supported level. It is disabled when the model has no adjustable effort. Model, effort, and authentication changes are locked during an active run.
-7. Write a prompt. Type **`@`** for notes/folders or **`/`** for skills; **Attach note** and **Skills** remain available as buttons.
+5. Click the model name inside the composer to open the model menu. Models are grouped by provider with context size and thinking/image support; your recently used models appear at the top, and typing filters across providers, names, and IDs. **Manage providers** opens connection settings. Use **Refresh models** in Settings when a dynamic catalog needs updating.
+6. Use the brain-icon **thinking effort** menu to choose a supported level. It is hidden when the model has no adjustable effort. Model, effort, and authentication changes are locked during an active run.
+7. Write a prompt. Type **`@`** for notes/folders or **`/`** for skills; the **+** menu also offers **Attach a note**, **Upload from computer**, and **Use a skill**.
 
 You can also select text in an editor and run **ObsidiAI: Ask agent about selection**. This adds a draft attachment; it does not send anything automatically.
 
@@ -72,7 +72,7 @@ Type `@` in the composer and filter by a note or folder path, including spaces a
 
 After sending, your message shows the prompt plus compact file/skill labels, not the expanded context payload. The model still receives the attached snapshots, and saved model context still contains them; hiding the payload in the chat is a presentation change, not a privacy filter. Older saved transcripts retain their original display text and note links.
 
-**Automatic open-note context:** enable **Open notes** in the composer or **Automatically attach open notes** in Settings. It is **off by default**, and the preference is saved. Dashed chips show the open Markdown tabs to be included; remove a chip to exclude that note for the next message. At Send, editable tabs contribute current unsaved text; reading/deferred tabs use their saved contents. Duplicate tabs are combined, and a manual attachment or editor selection takes precedence over automatic context for the same path. Hidden/configuration paths are excluded. Oversized notes (over 200,000 characters) or context that changes during preparation stop submission rather than being silently truncated.
+**Automatic open-note context:** turn on **Include open notes** in the composer's **+** menu or **Automatically attach open notes** in Settings. It is **off by default**, and the preference is saved. Dashed chips show the open Markdown tabs to be included; remove a chip to exclude that note for the next message. At Send, editable tabs contribute current unsaved text; reading/deferred tabs use their saved contents. Duplicate tabs are combined, and a manual attachment or editor selection takes precedence over automatic context for the same path. Hidden/configuration paths are excluded. Oversized notes (over 200,000 characters) or context that changes during preparation stop submission rather than being silently truncated.
 
 Automatic context is captured anew for each message; exclusions reset after submission. Turning the option off stops new automatic attachments—it does not remove context already sent to a provider or saved in a conversation.
 
@@ -119,10 +119,10 @@ Bulk deletion previews the selected titles and total before **Delete N permanent
 
 The conversation uses native Obsidian components and follows your theme. No embedded web app or additional UI framework.
 
-- **Start in the center.** Suggested prompts fill the draft without sending it. Provider setup remains visible until a model is ready.
-- **Keep actions with the draft.** The paperclip, Skills picker, Open notes toggle, model selector, thinking-effort picker, permissions control, and Send/Stop controls sit inside the composer. Selected context appears as removable chips.
+- **Start in the center.** A greeting sits above the composer, with suggested prompts below it; they fill the draft without sending it. Provider setup remains visible until a model is ready.
+- **Keep actions with the draft.** The **+** menu (notes, files, skills, and the open-notes toggle) and permissions menu sit at the left of the composer; the model menu, thinking-effort menu, and Send/Stop sit at the right. A dot on **+** shows open notes will be included. Menus support arrow keys, Enter, and Escape. Selected context appears as removable chips.
 - **Read without clutter.** User messages align right; assistant responses use a readable column capped at 760px. Expand tool-call chains and individual calls for results and note links. Error details expand inside their chain; its summary flags failures. Pending approval cards remain outside collapsed chains, with note diffs in a darker padded inset and added/removed text in green/red.
-- **Follow a live answer.** Incoming text gently fades into place while earlier text stays stable. The notebook logo and Thinking indicator pulse while streaming; completed Markdown has a brief transition. Reduced-motion preferences disable these effects.
+- **Follow a live answer.** Incoming text gently fades into place while earlier text stays stable. The logo beneath a streaming response and the Thinking indicator animate while streaming; completed responses offer a **Copy** button; completed Markdown has a brief transition. Reduced-motion preferences disable these effects.
 - **Use any pane width.** The layout adapts to narrow split panes and Obsidian's light/dark themes. Enter sends; Shift+Enter adds a line. Scrolling upward pauses automatic following; **Jump to latest** resumes it.
 
 ## Make repeatable workflows with skills

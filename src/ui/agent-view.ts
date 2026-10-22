@@ -2,7 +2,7 @@ import { ButtonComponent, Component, FuzzySuggestModal, ItemView, MarkdownRender
 import type { App, WorkspaceLeaf } from "obsidian";
 import type { Model, Api, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { AgentController, TimelineItem } from "../agent/controller";
-import { ConnectionSettingsModal, getConnectionBusy, runConnectionOperation, subscribeConnectionState } from "../settings";
+import { ConnectionSettingsModal, getConnectionBusy, runConnectionOperation, subscribeConnectionState, withRecentModel } from "../settings";
 import type { SettingsHost } from "../settings";
 import { validateVaultPath } from "../vault/paths";
 import type { PermissionMode } from "./approval";
@@ -12,6 +12,7 @@ import { ChatHistoryView } from "./history-view";
 import type { Attachment } from "../agent/attachments";
 import { FILE_ACCEPT, isLargePaste, readAttachmentFile } from "./attachment-input";
 import { AttachmentPreviewModal } from "./attachment-preview";
+import { Popover, type PopoverContent, type PopoverItem, type PopoverOptions, type PopoverSection } from "./popover";
 
 export const AGENT_VIEW_TYPE = "obsidiai-agent";
 export interface AgentViewHost extends SettingsHost {
@@ -31,6 +32,11 @@ class ChoiceModal<T> extends FuzzySuggestModal<T> {
 const THINKING_LABELS: Record<ModelThinkingLevel, string> = {
  off: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum",
 };
+const THINKING_DESCRIPTIONS: Record<ModelThinkingLevel, string> = {
+ off: "Answer directly", minimal: "A brief look before answering", low: "Quick reasoning", medium: "Balanced reasoning",
+ high: "Deeper reasoning for harder problems", xhigh: "Extended reasoning; slower", max: "Most thorough; slowest and most tokens",
+};
+const PERMISSION_ICONS: Record<PermissionMode, string> = { "read-only": "eye", ask: "shield-check", "auto-approve-notes": "zap" };
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
  "read-only": "Read-only", ask: "Ask before changes", "auto-approve-notes": "Auto-approve notes",
 };
@@ -51,6 +57,7 @@ interface RenderedMessage {
  notice?: HTMLElement;
  tail?: HTMLElement;
  tailText?: string;
+ footer?: HTMLElement;
 }
 interface RenderedToolChain {
  el: HTMLDetailsElement;
@@ -78,6 +85,17 @@ const TOOL_PRESENTATION: Record<string, { label: string; icon: string }> = {
  inspect_plugin_settings: { label: "Reviewing plugin settings access", icon: "eye" },
  propose_plugin_settings_change: { label: "Plugin settings change", icon: "settings-2" },
 };
+function formatTokens(count: number): string {
+ if (count >= 1_000_000) return `${Number((count / 1_000_000).toFixed(1))}M`;
+ return count >= 1000 ? `${Math.round(count / 1000)}K` : String(count);
+}
+function modelSummary(model: Model<Api>): string {
+ return [model.contextWindow > 0 ? `${formatTokens(model.contextWindow)} context` : "", model.reasoning ? "Thinking" : "", model.input.includes("image") ? "Images" : ""].filter(Boolean).join(" · ");
+}
+function greeting(): string {
+ const hour = new Date().getHours();
+ return hour < 5 ? "Burning the midnight oil?" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+}
 const STATUS_LABELS: Record<string, string> = {
  running: "Working", "awaiting-approval": "Needs approval", stopping: "Stopping",
  success: "Done", applied: "Applied", shared: "Shared", unchanged: "Unchanged", rejected: "Rejected",
@@ -108,12 +126,16 @@ export class AgentView extends ItemView {
  private thinkingButton?: ButtonComponent;
  private thinkingLabel?: HTMLElement;
  private permissionButton?: ButtonComponent;
+ private permissionIcon?: HTMLElement;
  private permissionLabel?: HTMLElement;
- private openNotesButton?: ButtonComponent;
+ private plusButton?: ButtonComponent;
  private readonly excludedOpenNotes = new Set<string>();
  private disclosure?: HTMLElement;
  private modelProbe?: AbortController;
- private selectionModal?: FuzzySuggestModal<Model<Api>> | FuzzySuggestModal<ModelThinkingLevel> | FuzzySuggestModal<PermissionMode>;
+ private popover?: Popover;
+ private popoverAnchor?: HTMLElement;
+ private greetingText?: HTMLElement;
+ private suggestionsEl?: HTMLElement;
  private sendButton?: ButtonComponent;
  private stopButton?: ButtonComponent;
  private newButton?: ButtonComponent;
@@ -127,7 +149,6 @@ export class AgentView extends ItemView {
  private attachmentPending = false;
  private attachmentStatus?: HTMLElement;
  private fileInput?: HTMLInputElement;
- private fileButton?: ButtonComponent;
  private filePickerEpoch?: number;
  private pastedTextCount = 0;
  private dropHint?: HTMLElement;
@@ -197,25 +218,9 @@ export class AgentView extends ItemView {
   this.addChild(this.historyView);
   this.scrollEl = stage.createDiv({ cls: "obsidiai-scroll" });
   this.emptyEl = this.scrollEl.createDiv({ cls: "obsidiai-welcome" });
-  setIcon(this.emptyEl.createDiv({ cls: "obsidiai-hero-mark", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
-  this.emptyEl.createEl("h1", { text: "What’s on your mind?" });
-  this.emptyEl.createEl("p", { cls: "obsidiai-welcome-copy", text: "A place to think with your notes." });
-  const suggestions = this.emptyEl.createDiv({ cls: "obsidiai-suggestions" });
-  for (const suggestion of [
-   { label: "Find a note", detail: "Start with a topic", icon: "search", prompt: "Find notes related to " },
-   { label: "Connect ideas", detail: "Follow the links", icon: "network", prompt: "Help me explore connections between notes. Ask which topic I want to start with." },
-   { label: "Review a draft", detail: "Make it clearer", icon: "file-pen-line", prompt: "Help me review a note and suggest improvements. Ask which note to work on before proposing any edits." },
-  ]) {
-   const button = suggestions.createEl("button", { cls: "obsidiai-suggestion", attr: { type: "button" } });
-   setIcon(button.createSpan({ cls: "obsidiai-suggestion-icon", attr: { "aria-hidden": "true" } }), suggestion.icon);
-   const copy = button.createSpan({ cls: "obsidiai-suggestion-copy" });
-   copy.createSpan({ cls: "obsidiai-suggestion-title", text: suggestion.label });
-   copy.createSpan({ cls: "obsidiai-suggestion-detail", text: suggestion.detail });
-   this.registerDomEvent(button, "click", () => {
-    if (!this.textarea || !controller.idle) return;
-    this.textarea.value = suggestion.prompt; this.resizeComposer(); this.textarea.focus(); this.schedule();
-   });
-  }
+  const heading = this.emptyEl.createEl("h1", { cls: "obsidiai-greeting" });
+  setIcon(heading.createSpan({ cls: "obsidiai-greeting-mark", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
+  this.greetingText = heading.createSpan({ text: greeting() });
   this.timelineEl = this.scrollEl.createDiv({ cls: "obsidiai-timeline", attr: { "aria-label": "Conversation" } });
   this.registerDomEvent(this.timelineEl, "click", event => this.openModifiedNoteLink(event), { capture: true });
   this.registerDomEvent(this.scrollEl, "scroll", () => {
@@ -235,7 +240,7 @@ export class AgentView extends ItemView {
 
   const composer = composeRegion.createDiv({ cls: "obsidiai-composer-card" });
   this.chips = composer.createDiv({ cls: "obsidiai-chips", attr: { "aria-label": "Draft context" } });
-  this.textarea = composer.createEl("textarea", { cls: "obsidiai-composer", attr: { placeholder: "Ask anything about your vault…", "aria-label": "Message", rows: "2" } });
+  this.textarea = composer.createEl("textarea", { cls: "obsidiai-composer", attr: { placeholder: "How can I help with your notes today?", "aria-label": "Message", rows: "2" } });
   this.registerDomEvent(this.textarea, "input", () => { this.resizeComposer(); this.schedule(); });
   this.registerDomEvent(this.textarea, "paste", event => this.pasteAttachments(event));
   this.composerSuggest = new ComposerSuggest(this.textarea, composer, trigger => this.contextChoices(trigger),
@@ -245,42 +250,49 @@ export class AgentView extends ItemView {
   this.attachmentStatus = composer.createDiv({ cls: "obsidiai-attachment-status", attr: { role: "status", "aria-live": "polite" } });
   const actions = composer.createDiv({ cls: "obsidiai-composer-actions" });
   const contextActions = actions.createDiv({ cls: "obsidiai-context-actions" });
-  this.iconButton(contextActions, "Attach note", "paperclip", () => this.attachNote());
+  this.plusButton = this.iconButton(contextActions, "Add files, notes, and more", "plus", () => this.openAddMenu());
+  this.plusButton.buttonEl.addClass("obsidiai-plus-button");
+  this.plusButton.buttonEl.setAttrs({ "aria-haspopup": "menu", "aria-expanded": "false" });
   this.fileInput = composer.createEl("input", { type: "file", attr: { accept: FILE_ACCEPT, multiple: "", "aria-label": "Choose text files, PDFs, or images" } });
   this.fileInput.hidden = true;
-  this.fileButton = this.iconButton(contextActions, "Attach files from computer", "file-up", () => {
-   if (!this.canAttach()) return;
-   this.filePickerEpoch = this.attachmentEpoch; this.fileInput!.click();
-  });
   this.registerDomEvent(this.fileInput, "change", () => {
    const files = Array.from(this.fileInput!.files ?? []); this.fileInput!.value = "";
    if (this.filePickerEpoch === this.attachmentEpoch) void this.attachFiles(files);
   });
-  const skills = new ButtonComponent(contextActions).onClick(() => { void this.chooseSkill(); });
-  skills.buttonEl.addClass("obsidiai-text-button");
-  setIcon(skills.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "sparkles");
-  skills.buttonEl.createSpan({ text: "Skills" });
-  this.openNotesButton = new ButtonComponent(contextActions).onClick(() => { void this.toggleOpenNotes(); });
-  this.openNotesButton.buttonEl.addClass("obsidiai-text-button", "obsidiai-open-notes-button");
-  setIcon(this.openNotesButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "panels-top-left");
-  this.openNotesButton.buttonEl.createSpan({ text: "Open notes" });
+  this.permissionButton = new ButtonComponent(contextActions).onClick(() => this.choosePermissions());
+  this.permissionButton.buttonEl.addClass("obsidiai-text-button", "obsidiai-permission-button");
+  this.permissionButton.buttonEl.setAttrs({ "aria-haspopup": "menu", "aria-expanded": "false" });
+  this.permissionIcon = this.permissionButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } });
+  this.permissionLabel = this.permissionButton.buttonEl.createSpan({ cls: "obsidiai-button-label" });
   const modelActions = actions.createDiv({ cls: "obsidiai-model-actions" });
-  this.modelButton = new ButtonComponent(modelActions).onClick(() => { void this.chooseModel(); });
+  this.modelButton = new ButtonComponent(modelActions).onClick(() => this.chooseModel());
   this.modelButton.buttonEl.addClass("obsidiai-model-button");
+  this.modelButton.buttonEl.setAttrs({ "aria-haspopup": "menu", "aria-expanded": "false" });
   this.modelLabel = this.modelButton.buttonEl.createSpan();
   setIcon(this.modelButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "chevron-down");
   this.thinkingButton = new ButtonComponent(modelActions).onClick(() => this.chooseThinking());
   this.thinkingButton.buttonEl.addClass("obsidiai-thinking-button");
+  this.thinkingButton.buttonEl.setAttrs({ "aria-haspopup": "menu", "aria-expanded": "false" });
   setIcon(this.thinkingButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "brain");
-  this.thinkingLabel = this.thinkingButton.buttonEl.createSpan();
-  this.permissionButton = new ButtonComponent(modelActions).onClick(() => this.choosePermissions());
-  this.permissionButton.buttonEl.addClass("obsidiai-text-button", "obsidiai-permission-button");
-  setIcon(this.permissionButton.buttonEl.createSpan({ attr: { "aria-hidden": "true" } }), "shield-check");
-  this.permissionLabel = this.permissionButton.buttonEl.createSpan();
+  this.thinkingLabel = this.thinkingButton.buttonEl.createSpan({ cls: "obsidiai-button-label" });
   this.sendButton = this.iconButton(modelActions, "Send message", "arrow-up", () => { void this.send(); });
   this.sendButton.buttonEl.addClass("obsidiai-send");
   this.stopButton = this.iconButton(modelActions, "Stop generation", "square", () => { void controller.stop(); });
   this.stopButton.buttonEl.addClass("obsidiai-stop");
+  this.suggestionsEl = composeRegion.createDiv({ cls: "obsidiai-suggestions" });
+  for (const suggestion of [
+   { label: "Find a note", detail: "Start with a topic", icon: "search", prompt: "Find notes related to " },
+   { label: "Connect ideas", detail: "Follow the links", icon: "network", prompt: "Help me explore connections between notes. Ask which topic I want to start with." },
+   { label: "Review a draft", detail: "Make it clearer", icon: "file-pen-line", prompt: "Help me review a note and suggest improvements. Ask which note to work on before proposing any edits." },
+  ]) {
+   const button = this.suggestionsEl.createEl("button", { cls: "obsidiai-suggestion", attr: { type: "button", title: suggestion.detail } });
+   setIcon(button.createSpan({ cls: "obsidiai-suggestion-icon", attr: { "aria-hidden": "true" } }), suggestion.icon);
+   button.createSpan({ cls: "obsidiai-suggestion-title", text: suggestion.label });
+   this.registerDomEvent(button, "click", () => {
+    if (!this.textarea || !controller.idle) return;
+    this.textarea.value = suggestion.prompt; this.resizeComposer(); this.textarea.focus(); this.schedule();
+   });
+  }
   this.disclosure = composeRegion.createEl("p", { cls: "obsidiai-disclosure" });
   composeRegion.createDiv({ cls: "obsidiai-composer-hint", text: "Drop text files, PDFs, or images · Paste images or long text · @ notes · / skills · Enter to send" });
   this.dropHint = stage.createDiv({ cls: "obsidiai-drop-hint", text: "Drop text files, PDFs, or images to attach", attr: { role: "status" } }); this.dropHint.hidden = true;
@@ -348,73 +360,145 @@ export class AgentView extends ItemView {
    this.contextModal = picker; picker.open();
   } catch { new Notice("Could not read skills. Review skill-folder diagnostics in Settings."); }
  }
- private async chooseModel(): Promise<void> {
+ /** Clicking the anchor of the open menu closes it; any other menu replaces it. */
+ private showPopover(anchor: HTMLElement, options: PopoverOptions, content: (query: string) => PopoverContent): Popover | undefined {
+  const reopen = this.popoverAnchor !== anchor;
+  this.popover?.close(!reopen);
+  if (!reopen || this.closed) return undefined;
+  const popover = new Popover(this.contentEl, anchor, { ...options, closed: () => {
+   if (this.popover === popover) { this.popover = undefined; this.popoverAnchor = undefined; }
+   options.closed?.();
+  } }, content);
+  this.popover = popover; this.popoverAnchor = anchor;
+  return popover;
+ }
+ private openAddMenu(): void {
+  const controller = this.host.controller;
+  if (!controller?.idle || (this.attachmentPending && this.popoverAnchor !== this.plusButton!.buttonEl)) return;
+  this.showPopover(this.plusButton!.buttonEl, { label: "Add context", width: 290 }, () => {
+   const attachable = this.canAttach(), autoAttach = this.host.settings.autoAttachOpenNotes;
+   return { sections: [
+    { items: [
+     { title: "Attach a note", description: "Or type @ in the message", icon: "file-text", disabled: !attachable, action: () => this.attachNote() },
+     { title: "Upload from computer", description: "Text files, PDFs, or images", icon: "file-up", disabled: !attachable, action: () => this.pickFiles() },
+     { title: "Use a skill", description: "Or type / in the message", icon: "sparkles", disabled: !attachable, action: () => { void this.chooseSkill(); } },
+    ] },
+    { items: [{
+     title: "Include open notes", icon: "panels-top-left", toggle: true, checked: autoAttach, keepOpen: true,
+     description: autoAttach ? "Open Markdown tabs are captured at Send" : "Attach open Markdown tabs at Send",
+     tooltip: "Their contents, including unsaved edits, go to your provider and saved chat history.",
+     disabled: !controller.idle || this.attachmentPending || getConnectionBusy(this.host),
+     action: () => { void this.toggleOpenNotes().finally(() => this.popover?.refresh()); },
+    }] },
+   ] };
+  });
+ }
+ private pickFiles(): void {
+  if (!this.canAttach() || !this.fileInput) return;
+  this.filePickerEpoch = this.attachmentEpoch; this.fileInput.click();
+ }
+ private chooseModel(): void {
+  const anchor = this.modelButton!.buttonEl;
+  if (this.popoverAnchor === anchor) { this.popover?.close(true); return; }
   if (!this.host.controller?.idle || !this.host.runtime || this.modelProbe || getConnectionBusy(this.host)) return;
-  const probe = new AbortController(); this.modelProbe = probe; this.schedule();
   const registry = this.host.runtime.models;
-  try {
-   const results = await Promise.all(registry.getProviders().map(async provider => {
-    try { return { models: await registry.getAvailable(provider.id, { signal: probe.signal }), error: "" }; }
-    catch { return { models: [], error: provider.name }; }
-   }));
-   if (this.closed || probe.signal.aborted || !this.host.controller?.idle || getConnectionBusy(this.host)) return;
-   const failed = results.filter(result => result.error).map(result => result.error);
-   if (failed.length) new Notice(`Could not check ${failed.join(", ")}. Other available providers are still listed; review authentication in Settings.`);
-   const models = results.flatMap(result => result.models).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-   if (!models.length) {
-    new Notice("No available models. Add provider authentication or refresh models in Settings.");
-    new ConnectionSettingsModal(this.app, this.host).open(); return;
-   }
-   const picker = new ChoiceModal<Model<Api>>(this.app, models, m => `${registry.getProvider(m.provider)?.name ?? m.provider} · ${m.name} (${m.id})`, m => {
-    if (this.closed || !this.host.controller?.idle || getConnectionBusy(this.host)) return;
-    const selection = new AbortController(); this.modelProbe = selection;
-    void runConnectionOperation(this.host, async () => {
-     const available = await registry.getAvailable(m.provider, { signal: selection.signal });
-     if (this.closed || selection.signal.aborted) return;
-     if (!available.some(model => model.id === m.id)) throw new Error("Model is no longer available. Reconnect or refresh models in Settings.");
-     const previousProvider = this.host.settings.providerId, previousModel = this.host.settings.modelId;
-     this.host.settings.providerId = m.provider; this.host.settings.modelId = m.id;
-     try { await this.host.saveSettings(); }
-     catch (error) { this.host.settings.providerId = previousProvider; this.host.settings.modelId = previousModel; throw error; }
-     await this.host.connectionChanged();
-    }).catch(() => { if (!this.closed && !selection.signal.aborted) new Notice("Could not select this model. Review authentication and storage in Settings."); })
-     .finally(() => { if (this.modelProbe === selection) this.modelProbe = undefined; this.schedule(); });
-   });
-   picker.setPlaceholder("Search available providers and models…");
-   this.selectionModal = picker; picker.open();
-  } catch { if (!this.closed && !probe.signal.aborted) new Notice("Could not load available models. Review authentication in Settings."); }
-  finally { if (this.modelProbe === probe) this.modelProbe = undefined; this.schedule(); }
+  const probe = new AbortController();
+  let models: Model<Api>[] | undefined, failed: string[] = [];
+  const popover = this.showPopover(anchor, { label: "Choose model", searchPlaceholder: "Search models", width: 340, align: "end", closed: () => { probe.abort(); if (this.modelProbe === probe) this.modelProbe = undefined; } },
+   query => this.modelMenuContent(models, failed, query));
+  if (!popover) return;
+  this.modelProbe = probe;
+  void Promise.all(registry.getProviders().map(async provider => {
+   try { return { models: await registry.getAvailable(provider.id, { signal: probe.signal }), error: "" }; }
+   catch { return { models: [], error: provider.name }; }
+  })).then(results => {
+   if (this.closed || probe.signal.aborted) return;
+   failed = results.filter(result => result.error).map(result => result.error);
+   models = results.flatMap(result => result.models).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+   popover.refresh();
+  }).finally(() => { if (this.modelProbe === probe) this.modelProbe = undefined; });
+ }
+ private modelMenuContent(models: readonly Model<Api>[] | undefined, failed: readonly string[], query: string): PopoverContent {
+  const registry = this.host.runtime?.models;
+  const { providerId, modelId, recentModels } = this.host.settings;
+  const providerName = (id: string) => registry?.getProvider(id)?.name ?? id;
+  const footer: PopoverItem[] = [{ title: "Manage providers", icon: "settings-2", action: () => new ConnectionSettingsModal(this.app, this.host).open() }];
+  if (!models) return { status: "Checking available models…", sections: [], footer };
+  const item = (model: Model<Api>, withProvider = false): PopoverItem => ({
+   title: model.name, description: [withProvider ? providerName(model.provider) : "", modelSummary(model)].filter(Boolean).join(" · "),
+   tooltip: `${providerName(model.provider)} / ${model.id}`, checked: model.provider === providerId && model.id === modelId,
+   action: () => this.selectModel(model),
+  });
+  const terms = query.split(/\s+/).filter(Boolean);
+  const matches = models.filter(model => { const text = `${providerName(model.provider)} ${model.name} ${model.id}`.toLocaleLowerCase(); return terms.every(term => text.includes(term)); });
+  const sections: PopoverSection[] = [];
+  if (!terms.length) {
+   const recent = recentModels.map(entry => models.find(model => model.provider === entry.providerId && model.id === entry.modelId)).filter((model): model is Model<Api> => !!model);
+   if (recent.length > 1) sections.push({ heading: "Recent", items: recent.map(model => item(model, true)) });
+  }
+  const groups = new Map<string, Model<Api>[]>();
+  for (const model of matches) groups.set(model.provider, [...groups.get(model.provider) ?? [], model]);
+  for (const [provider, list] of groups) sections.push({ heading: providerName(provider), items: list.map(model => item(model)) });
+  return {
+   sections, footer, status: failed.length ? `Could not check ${failed.join(", ")}. Review authentication in Settings.` : undefined,
+   empty: models.length ? "No models match your search." : "No available models yet. Connect a provider to get started.",
+  };
+ }
+ private selectModel(m: Model<Api>): void {
+  const registry = this.host.runtime?.models;
+  if (!registry || this.closed || !this.host.controller?.idle || getConnectionBusy(this.host)) return;
+  if (m.provider === this.host.settings.providerId && m.id === this.host.settings.modelId && this.host.controller.ready) return;
+  const selection = new AbortController(); this.modelProbe = selection;
+  void runConnectionOperation(this.host, async () => {
+   const available = await registry.getAvailable(m.provider, { signal: selection.signal });
+   if (this.closed || selection.signal.aborted) return;
+   if (!available.some(model => model.id === m.id)) throw new Error("Model is no longer available. Reconnect or refresh models in Settings.");
+   const previousProvider = this.host.settings.providerId, previousModel = this.host.settings.modelId, previousRecent = this.host.settings.recentModels;
+   this.host.settings.providerId = m.provider; this.host.settings.modelId = m.id;
+   this.host.settings.recentModels = withRecentModel(previousRecent, m.provider, m.id);
+   try { await this.host.saveSettings(); }
+   catch (error) { this.host.settings.providerId = previousProvider; this.host.settings.modelId = previousModel; this.host.settings.recentModels = previousRecent; throw error; }
+   await this.host.connectionChanged();
+  }).catch(() => { if (!this.closed && !selection.signal.aborted) new Notice("Could not select this model. Review authentication and storage in Settings."); })
+   .finally(() => { if (this.modelProbe === selection) this.modelProbe = undefined; this.schedule(); });
  }
  private chooseThinking(): void {
   const controller = this.host.controller;
   if (!controller?.idle || !controller.ready || getConnectionBusy(this.host) || controller.thinkingLevels.length < 2) return;
   const providerId = this.host.settings.providerId, modelId = this.host.settings.modelId;
-  const picker = new ChoiceModal<ModelThinkingLevel>(this.app, [...controller.thinkingLevels], level => `${THINKING_LABELS[level]}${level === controller.thinkingLevel ? " — selected" : ""}`, level => {
-   if (this.closed || !controller.idle || !controller.ready || providerId !== this.host.settings.providerId || modelId !== this.host.settings.modelId) return;
-   void runConnectionOperation(this.host, async () => {
-    const previous = this.host.settings.thinkingLevel, previousEffective = controller.thinkingLevel;
-    controller.setThinkingLevel(level); this.host.settings.thinkingLevel = level;
-    try { await this.host.saveSettings(); }
-    catch (error) {
-     this.host.settings.thinkingLevel = previous;
-     if (controller.idle && controller.ready) controller.setThinkingLevel(previousEffective);
-     throw error;
-    }
-   }).catch(() => { if (!this.closed) new Notice("Could not save thinking effort. The previous setting is retained."); });
-  });
-  picker.setPlaceholder("Thinking effort · higher levels may use more tokens and time");
-  this.selectionModal = picker; picker.open();
+  this.showPopover(this.thinkingButton!.buttonEl, { label: "Thinking effort", width: 270, align: "end" }, () => ({
+   sections: [{ heading: "Thinking effort", items: controller.thinkingLevels.map(level => ({
+    title: THINKING_LABELS[level], description: THINKING_DESCRIPTIONS[level], checked: level === controller.thinkingLevel,
+    action: () => this.selectThinking(level, providerId, modelId),
+   })) }],
+   note: "Higher effort can help with harder tasks but uses more tokens and time.",
+  }));
+ }
+ private selectThinking(level: ModelThinkingLevel, providerId: string | null, modelId: string | null): void {
+  const controller = this.host.controller;
+  if (this.closed || !controller?.idle || !controller.ready || providerId !== this.host.settings.providerId || modelId !== this.host.settings.modelId || level === controller.thinkingLevel) return;
+  void runConnectionOperation(this.host, async () => {
+   const previous = this.host.settings.thinkingLevel, previousEffective = controller.thinkingLevel;
+   controller.setThinkingLevel(level); this.host.settings.thinkingLevel = level;
+   try { await this.host.saveSettings(); }
+   catch (error) {
+    this.host.settings.thinkingLevel = previous;
+    if (controller.idle && controller.ready) controller.setThinkingLevel(previousEffective);
+    throw error;
+   }
+  }).catch(() => { if (!this.closed) new Notice("Could not save thinking effort. The previous setting is retained."); });
  }
  private choosePermissions(): void {
   const controller = this.host.controller;
   if (!controller?.idle || getConnectionBusy(this.host)) return;
   const modes: PermissionMode[] = ["read-only", "ask", "auto-approve-notes"];
-  const picker = new ChoiceModal<PermissionMode>(this.app, modes, mode => `${PERMISSION_LABELS[mode]}${mode === controller.permissionMode ? " — selected" : ""} · ${PERMISSION_DESCRIPTIONS[mode]}`, mode => {
-   if (this.closed || !controller.idle || getConnectionBusy(this.host)) return;
-   controller.setPermissionMode(mode);
-  });
-  picker.setPlaceholder("Permissions · resets to Ask before changes for each new conversation");
-  this.selectionModal = picker; picker.open();
+  this.showPopover(this.permissionButton!.buttonEl, { label: "Permissions", width: 300 }, () => ({
+   sections: [{ heading: "Permissions", items: modes.map(mode => ({
+    title: PERMISSION_LABELS[mode], description: PERMISSION_DESCRIPTIONS[mode], icon: PERMISSION_ICONS[mode], checked: mode === controller.permissionMode,
+    action: () => { if (!this.closed && controller.idle && !getConnectionBusy(this.host)) controller.setPermissionMode(mode); },
+   })) }],
+   note: "Resets to Ask before changes for each new conversation.",
+  }));
  }
  private async toggleOpenNotes(): Promise<void> {
   if (this.closed || !this.host.controller?.idle || this.attachmentPending || getConnectionBusy(this.host)) return;
@@ -598,6 +682,9 @@ export class AgentView extends ItemView {
   if (empty) this.followLatest = true;
   this.contentEl.setAttr("data-empty", String(empty));
   this.emptyEl!.hidden = !empty;
+  this.suggestionsEl!.hidden = !empty;
+  if (empty) this.greetingText!.setText(greeting());
+  this.textarea!.placeholder = empty ? "How can I help with your notes today?" : "Reply to ObsidiAI…";
   this.timelineEl.hidden = empty;
   const busy = getConnectionBusy(this.host);
   this.statusEl!.setText(controller.idle ? busy ? "Connecting" : controller.ready ? "Ready" : "Not connected" : STATUS_LABELS[controller.state] ?? controller.state);
@@ -608,26 +695,29 @@ export class AgentView extends ItemView {
   const model = providerId && modelId ? this.host.runtime?.models.getModel(providerId, modelId) : undefined;
   this.modelLabel!.setText(model?.name ?? "Choose model");
   const providerName = providerId ? this.host.runtime?.models.getProvider(providerId)?.name ?? providerId : "";
-  this.modelButton!.setTooltip(providerId && modelId ? `${providerName} / ${modelId}` : "Choose a model from your connected providers").setDisabled(!controller.idle || busy || !!this.modelProbe);
+  this.modelButton!.setTooltip(providerId && modelId ? `${providerName} / ${modelId}` : "Choose a model from your connected providers").setDisabled(!controller.idle || busy);
   this.modelButton!.buttonEl.setAttr("aria-label", `Choose model: ${providerName ? `${providerName} / ` : ""}${model?.name ?? "not selected"}`);
   const thinking = THINKING_LABELS[controller.thinkingLevel];
   this.thinkingLabel!.setText(thinking);
+  // Fixed-effort models have nothing to choose, so the control steps aside as in a single-option menu.
+  this.thinkingButton!.buttonEl.hidden = controller.ready && controller.thinkingLevels.length < 2;
   this.thinkingButton!.setDisabled(!controller.idle || !controller.ready || busy || controller.thinkingLevels.length < 2)
-   .setTooltip(controller.ready && controller.thinkingLevels.length < 2 ? `This model has fixed thinking effort: ${thinking}` : `Thinking effort: ${thinking}. Higher levels may use more tokens and time.`);
+   .setTooltip(`Thinking effort: ${thinking}. Higher levels may use more tokens and time.`);
   this.thinkingButton!.buttonEl.setAttr("aria-label", `Thinking effort: ${thinking}`);
-  const permission = PERMISSION_LABELS[controller.permissionMode];
+  const mode = controller.permissionMode, permission = PERMISSION_LABELS[mode];
   this.permissionLabel!.setText(permission);
-  this.permissionButton!.setDisabled(!controller.idle || busy).setTooltip(`${PERMISSION_DESCRIPTIONS[controller.permissionMode]} New conversations reset to Ask before changes.`);
+  if (this.permissionIcon!.dataset.mode !== mode) { setIcon(this.permissionIcon!, PERMISSION_ICONS[mode]); this.permissionIcon!.dataset.mode = mode; }
+  this.permissionButton!.setDisabled(!controller.idle || busy).setTooltip(`${PERMISSION_DESCRIPTIONS[mode]} New conversations reset to Ask before changes.`);
   this.permissionButton!.buttonEl.setAttr("aria-label", `Permissions: ${permission}`);
-  this.openNotesButton!.setDisabled(!controller.idle || this.attachmentPending || busy)
-   .setTooltip(this.host.settings.autoAttachOpenNotes ? "Open-note context is on. Visible Markdown tabs are captured at Send, including unsaved edits. Remove a chip to exclude a note for this message." : "Automatically attach open Markdown notes at Send. Their contents go to your provider and saved chat history.");
-  this.openNotesButton!.buttonEl.setAttrs({ "aria-pressed": String(this.host.settings.autoAttachOpenNotes), "aria-label": "Automatically attach open notes" });
-  this.permissionButton!.buttonEl.setAttr("data-mode", controller.permissionMode);
+  this.permissionButton!.buttonEl.setAttr("data-mode", mode);
+  this.plusButton!.setDisabled(!controller.idle || this.attachmentPending)
+   .setTooltip(this.host.settings.autoAttachOpenNotes ? "Add files, notes, and more · Open notes are included at Send" : "Add files, notes, and more");
+  this.plusButton!.buttonEl.setAttr("data-open-notes", String(this.host.settings.autoAttachOpenNotes));
+  if (!controller.idle) this.popover?.close();
   this.disclosure!.setText(`The agent may send notes, metadata, graph links, skills, and non-secret plugin manifests to your provider. Attached text/images and explicitly shared plugin settings are sent to your provider and saved in chat history. ${PERMISSION_DESCRIPTIONS[controller.permissionMode]} Plugin changes can run third-party code. ${controller.historyMessage}`);
   this.newButton!.setDisabled(!controller.idle || this.attachmentPending);
   this.historyButton!.setDisabled(!controller.idle || this.attachmentPending);
   this.sendButton!.setDisabled(!controller.idle || !controller.ready || busy || this.attachmentPending || (!this.textarea!.value.trim() && !controller.selectedSkills.size && !controller.attachments.length));
-  this.fileButton!.setDisabled(!this.canAttach());
   if (!controller.idle) this.composerSuggest?.dismiss();
   this.sendButton!.buttonEl.hidden = !controller.idle;
   this.stopButton!.buttonEl.hidden = controller.idle;
@@ -763,10 +853,6 @@ export class AgentView extends ItemView {
      title.createSpan({ cls: "obsidiai-code-notice", text: "Can run third-party code" });
     }
     notice = title.createSpan({ cls: "obsidiai-tool-notice" }); notice.hidden = true;
-   } else if (item.kind === "assistant") {
-    const author = el.createDiv({ cls: "obsidiai-author" });
-    setIcon(author.createSpan({ cls: "obsidiai-assistant-logo", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
-    author.createSpan({ text: "ObsidiAI" });
    }
    const sentAttachments = item.kind === "user" ? this.host.controller!.getSentAttachments(item) : [];
    if (item.kind === "user" && (sentAttachments.length || item.attachmentPaths?.length || item.skillNames?.length)) {
@@ -792,7 +878,12 @@ export class AgentView extends ItemView {
    }
    const body = el.createDiv({ cls: item.kind === "tool" ? "obsidiai-tool-body" : "obsidiai-message-body" });
    const text = el.doc.createTextNode(""); body.appendChild(text);
-   rendered = { el, body, text, last: "", complete: false, status, context, notice };
+   let footer: HTMLElement | undefined;
+   if (item.kind === "assistant") {
+    footer = el.createDiv({ cls: "obsidiai-message-footer" });
+    setIcon(footer.createSpan({ cls: "obsidiai-assistant-logo", attr: { "aria-hidden": "true" } }), "obsidiai-logo");
+   }
+   rendered = { el, body, text, last: "", complete: false, status, context, notice, footer };
    this.rendered.set(item.id, rendered);
   }
   if (rendered.el.parentElement !== parent) parent.appendChild(rendered.el);
@@ -835,6 +926,7 @@ export class AgentView extends ItemView {
    rendered.el.hidden = !item.text;
    rendered.tail = undefined; rendered.tailText = undefined;
    rendered.body.empty(); rendered.body.addClass("obsidiai-prose");
+   if (item.text && rendered.footer) this.addCopyButton(rendered.footer, item.text);
    const component = new Component(); this.addChild(component); rendered.component = component;
    const record = rendered;
    void MarkdownRenderer.render(this.app, item.text, rendered.body, item.sourcePath, component).then(() => {
@@ -863,12 +955,24 @@ export class AgentView extends ItemView {
    }
   }
  }
+ private addCopyButton(footer: HTMLElement, text: string): void {
+  let reset: number | undefined;
+  const copy = this.iconButton(footer, "Copy response", "copy", () => {
+   void navigator.clipboard.writeText(text).then(() => {
+    if (this.closed) return;
+    setIcon(copy.buttonEl, "check"); copy.setTooltip("Copied");
+    this.contentEl.win.clearTimeout(reset);
+    reset = this.contentEl.win.setTimeout(() => { setIcon(copy.buttonEl, "copy"); copy.setTooltip("Copy response"); }, 1500);
+   }, () => { if (!this.closed) new Notice("Could not copy the response."); });
+  });
+  copy.buttonEl.addClass("obsidiai-copy-button");
+ }
  private release(): void {
   this.closed = true;
   this.attachmentEpoch++; this.composerSuggest?.dispose(); this.contextModal?.close();
-  this.dragDepth = 0; this.filePickerEpoch = undefined; this.fileInput = undefined; this.fileButton = undefined; this.dropHint = undefined;
+  this.dragDepth = 0; this.filePickerEpoch = undefined; this.fileInput = undefined; this.dropHint = undefined;
   if (this.historyView) { this.removeChild(this.historyView); this.historyView = undefined; }
-  this.modelProbe?.abort(); this.selectionModal?.close();
+  this.modelProbe?.abort(); this.popover?.close();
   this.unsubscribe?.(); this.hostUnsubscribe?.(); this.connectionUnsubscribe?.();
   this.resizeObserver?.disconnect();
   if (this.frame !== undefined) this.contentEl.win.cancelAnimationFrame(this.frame);
